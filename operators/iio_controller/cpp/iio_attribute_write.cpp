@@ -1,0 +1,126 @@
+// Copyright 2025 Analog Devices, Inc.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+#include "iio_attribute_write.hpp"
+#include <iio.h>
+
+using namespace holoscan::ops;
+
+void IIOAttributeWrite::setup(OperatorSpec& spec) {
+  HOLOSCAN_LOG_DEBUG("IIOAttributeWrite setup");
+  // TODO: Maybe output the return code of the write op
+  spec.input<std::string>("value");
+
+  spec.param<std::string>(ctx_p_, "ctx", "IIO Context", "The URI of the IIO Context");
+  spec.param<std::string>(dev_p_, "dev", "IIO Device", "Name of the IIO Device", "");
+  spec.param<std::string>(chan_p_, "chan", "IIO Channel", "Name of the IIO Channel", "");
+  spec.param<bool>(channel_is_output_,
+                   "channel_is_output",
+                   "IIO Channel is Output",
+                   "Is the channel output?",
+                   false);
+  spec.param<std::string>(attr_name_p_, "attr_name", "IIO Attribute", "Name of the IIO Attribute");
+}
+
+void IIOAttributeWrite::initialize() {
+  HOLOSCAN_LOG_INFO("IIOAttributeWrite initialize");
+  Operator::initialize();
+
+  // Cannot work wihout the name of an attribute
+  attr_type_ = attr_type_t::UNKNOWN;
+  attr_name_ = attr_name_p_.get();
+
+  // Cannot work without a context
+  ctx_ = iio_create_context_from_uri(ctx_p_.get().c_str());
+  if (!ctx_) {
+    HOLOSCAN_LOG_ERROR("Failed to create context");
+    return;
+  }
+  attr_type_ = attr_type_t::CONTEXT;
+
+  if (!dev_p_.get().empty()) {
+    dev_ = iio_context_find_device(ctx_, dev_p_.get().c_str());
+    if (dev_ == nullptr) {
+      HOLOSCAN_LOG_ERROR("Failed to find device {}", dev_p_.get());
+      return;
+    }
+    attr_type_ = attr_type_t::DEVICE;
+  } else {
+    dev_ = nullptr;
+  }
+
+  if (dev_ && !chan_p_.get().empty()) {
+    chan_ = iio_device_find_channel(dev_, chan_p_.get().c_str(), channel_is_output_.get());
+    if (chan_ == nullptr) {
+      HOLOSCAN_LOG_ERROR("Failed to find channel {}", chan_p_.get());
+      return;
+    }
+    attr_type_ = attr_type_t::CHANNEL;
+  } else {
+    chan_ = nullptr;
+  }
+}
+
+void IIOAttributeWrite::compute(InputContext& op_input, OutputContext&, ExecutionContext&) {
+  HOLOSCAN_LOG_INFO("IIOAttributeWrite compute");
+  auto value = op_input.receive<std::string>("value").value();
+
+  switch (attr_type_) {
+    case attr_type_t::CONTEXT: {
+      // NOTE: The context attributes are read only
+      HOLOSCAN_LOG_DEBUG("Context attribute");
+      break;
+    }
+    case attr_type_t::DEVICE: {
+      HOLOSCAN_LOG_DEBUG("Device attribute");
+      // In the current API we don't know the type of the attribute, so we try all possibilities
+      ret = iio_device_attr_write(dev_, attr_name_.c_str(), value.c_str());
+      if (ret < 0) {
+        HOLOSCAN_LOG_DEBUG("Failed to write {} in device attribute {}", value, attr_name_);
+      } else {
+        return;
+      }
+
+      ret = iio_device_debug_attr_write(dev_, attr_name_.c_str(), value.c_str());
+      if (ret < 0) {
+        HOLOSCAN_LOG_DEBUG("Failed to write {} in device debug attribute {}", value, attr_name_);
+      } else {
+        return;
+      }
+
+      ret = iio_device_buffer_attr_write(dev_, attr_name_.c_str(), value.c_str());
+      if (ret < 0) {
+        HOLOSCAN_LOG_DEBUG("Failed to write {} in device buffer attribute {}", value, attr_name_);
+      } else {
+        return;
+      }
+
+      break;
+    }
+    case attr_type_t::CHANNEL: {
+      HOLOSCAN_LOG_DEBUG("Channel attribute");
+      // This is a channel attribute (or mistake)
+      ret = iio_channel_attr_write(chan_, attr_name_p_.get().c_str(), value.c_str());
+      if (ret < 0) {
+        HOLOSCAN_LOG_DEBUG("Failed to write {} in channel attribute {}", value, attr_name_p_.get());
+        return;
+      }
+
+      break;
+    }
+    default:
+      HOLOSCAN_LOG_ERROR("Unknown attribute type");
+      return;
+  }
+}

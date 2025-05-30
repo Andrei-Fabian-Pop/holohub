@@ -35,36 +35,24 @@ void IIOBufferWrite::setup(OperatorSpec& spec) {
   HOLOSCAN_LOG_INFO("IIOBufferWrite setup");
   spec.input<std::shared_ptr<iio_buffer_info_t>>("buffer");
 
-  spec.param<std::string>(ctx_p_, "ctx", "IIO Context", "The URI of the IIO Context", "");
-  spec.param<std::string>(dev_p_, "dev", "IIO Device", "Name of the IIO Device", "");
-  spec.param<bool>(is_cyclic, "is_cyclic", "Is cyclic", "Is the buffer cyclic?", true);
+  spec.param<std::string>(ctx_p_, "ctx", "IIO Context", "The URI of the IIO Context");
+  spec.param<std::string>(dev_p_, "dev", "IIO Device", "Name of the IIO Device");
+  spec.param<bool>(is_cyclic, "is_cyclic", "Is cyclic", "Is the buffer cyclic?");
   spec.param<std::vector<std::string>>(
       enabled_channel_names_p_,
       "enabled_channel_names",
       "Names of the enabled IIO Channels",
-      "The names of the channels that are enabled when pushing the buffer",
-      {});
+      "The names of the channels that are enabled when pushing the buffer");
   spec.param<std::vector<bool>>(
       enabled_channel_types_p_,
       "enabled_channel_output",
       "Types of the enabled IIO Channels",
-      "The types of the channels that are enabled when pushing the buffer",
-      {});
+      "The types of the channels that are enabled when pushing the buffer");
 }
 
 void IIOBufferWrite::initialize() {
   HOLOSCAN_LOG_INFO("IIOBufferWrite initialize");
   Operator::initialize();
-
-  if (is_default_value(ctx_p_)) {
-    HOLOSCAN_LOG_ERROR("IIO Context is not set. Cannot use operator.");
-    return;
-  }
-
-  if (is_default_value(dev_p_)) {
-    HOLOSCAN_LOG_ERROR("IIO Device is not set. Cannot use operator.");
-    return;
-  }
 
   if (enabled_channel_names_p_.get().empty() || enabled_channel_types_p_.get().empty()) {
     HOLOSCAN_LOG_ERROR(

@@ -34,11 +34,6 @@ class IIOBufferWrite : public Operator {
   void initialize() override;
   void compute(InputContext& op_input, OutputContext& op_output, ExecutionContext& ec) override;
 
-  template <typename T>
-  bool is_default_value(Parameter<T> p) const {
-    return p.has_default_value() && p.get() == p.default_value();
-  }
-
  private:
   Parameter<std::string> ctx_p_;
   Parameter<std::string> dev_p_;

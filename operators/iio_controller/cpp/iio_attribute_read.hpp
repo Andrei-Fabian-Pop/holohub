@@ -24,7 +24,7 @@
 
 namespace holoscan::ops {
 
-class IIOAttributeRead : public holoscan::Operator {
+class __attribute__((visibility("default"))) IIOAttributeRead : public holoscan::Operator {
  public:
   HOLOSCAN_OPERATOR_FORWARD_ARGS(IIOAttributeRead)
 
@@ -32,7 +32,7 @@ class IIOAttributeRead : public holoscan::Operator {
   ~IIOAttributeRead() = default;
 
   void setup(OperatorSpec& spec) override;
-  void initialize() override;
+  __attribute__((visibility("default"))) void initialize() override;
   void compute(InputContext& op_input, OutputContext& op_output, ExecutionContext& ec) override;
 
  private:

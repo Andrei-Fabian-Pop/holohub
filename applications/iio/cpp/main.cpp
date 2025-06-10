@@ -258,14 +258,14 @@ class App : public holoscan::Application {
     // add_flow(basic_emitter_op, iio_write_op, {{"value", "value"}});
 
     // Secondary flow, just for system setup
-    auto config_file_path = config().config_file();
-    auto iio_configurator_op = make_operator<ops::IIOConfigurator>(
-        "iio_configurator_op", Arg("cfg") = std::string(config_file_path));
-    add_flow(start_op(), iio_configurator_op);
+    // auto config_file_path = config().config_file();
+    // auto iio_configurator_op = make_operator<ops::IIOConfigurator>(
+    //     "iio_configurator_op", Arg("cfg") = std::string(config_file_path));
+    // add_flow(start_op(), iio_configurator_op);
 
     // TX flow
-    // add_flow(basic_buffer_emitter_op, iio_buf_write_op_1, {{"buffer", "buffer"}});
-    // add_flow(iio_buf_write_op_1, basic_wait_op);
+    add_flow(basic_buffer_emitter_op, iio_buf_write_op_1, {{"buffer", "buffer"}});
+    add_flow(iio_buf_write_op_1, basic_wait_op);
 
     // add_flow(iio_buf_write_op_1, iio_buf_read_op, {{"buffer", "buffer"}});
     // add_flow(iio_buf_read_op, iio_buf_write_op_2, {{"buffer", "buffer"}});

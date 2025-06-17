@@ -40,12 +40,6 @@ find_library(
         REQUIRED)
 
 include(pybind11_add_holohub_module)
-
 pybind11_add_holohub_module(
-  CPP_MAKE_TARGET holoscan::ops::iio_controller CLASS_NAME "IIOAttributeRead"
-  SOURCES iio_attribute_read.cpp)
-
-# target_link_libraries(iio_attribute_read_python PRIVATE iio_attribute_read)
-
-# pybind11_add_holohub_module(CPP_CMAKE_TARGET iio_configurator CLASS_NAME
-# "IIOConfigurator" SOURCES py_iio_configurator.cpp)
+  CPP_CMAKE_TARGET iio_controller CLASS_NAME
+  "IIOAttributeRead, IIOAttributeWrite" SOURCES iio_controller_py.cpp)

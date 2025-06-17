@@ -22,6 +22,7 @@
 
 using namespace holoscan::ops;
 
+// FIXME: This should not be in the destructor, the python bindings can break, see documentation
 IIOBufferWrite::~IIOBufferWrite() {
   if (buffer_) {
     iio_buffer_destroy(buffer_);

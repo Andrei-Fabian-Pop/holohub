@@ -24,7 +24,7 @@
 
 namespace holoscan::ops {
 
-class __attribute__((visibility("default"))) IIOAttributeRead : public holoscan::Operator {
+class IIOAttributeRead : public holoscan::Operator {
  public:
   HOLOSCAN_OPERATOR_FORWARD_ARGS(IIOAttributeRead)
 

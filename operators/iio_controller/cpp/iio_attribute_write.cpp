@@ -74,7 +74,13 @@ void IIOAttributeWrite::initialize() {
 
 void IIOAttributeWrite::compute(InputContext& op_input, OutputContext&, ExecutionContext&) {
   HOLOSCAN_LOG_INFO("IIOAttributeWrite compute");
-  auto value = op_input.receive<std::string>("value").value();
+  auto value_expected = op_input.receive<std::string>("value");
+
+  if (!value_expected.has_value()) {
+    HOLOSCAN_LOG_ERROR("No value received for attribute write");
+    return;
+  }
+  auto value = value_expected.value();
 
   switch (attr_type_) {
     case attr_type_t::CONTEXT: {

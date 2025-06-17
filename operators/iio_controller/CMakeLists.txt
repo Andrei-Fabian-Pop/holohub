@@ -18,6 +18,5 @@ project(iio_controller LANGUAGES NONE)
 add_subdirectory(cpp)
 
 if(HOLOHUB_BUILD_PYTHON)
-  message(STATUS "Building Python bindings for iio_controller")
   add_subdirectory(python)
 endif()

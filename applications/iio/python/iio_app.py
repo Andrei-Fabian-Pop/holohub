@@ -6,7 +6,7 @@ from typing import List
 
 from holoscan.core import Application, Operator, OperatorSpec
 from holoscan.conditions import CountCondition
-from holohub.iio_controller import IIOAttributeRead, IIOAttributeWrite, IIOBufferWrite, IIOBufferInfo
+from holohub.iio_controller import IIOAttributeRead, IIOAttributeWrite, IIOBufferWrite, IIOBufferRead, IIOBufferInfo
 
 G_NUM_REPETITIONS = 10
 G_URI = "ip:192.168.2.1"
@@ -156,6 +156,58 @@ class BasicWaitOp(Operator):
         time.sleep(20)
 
 
+class BasicBufferPrinterOp(Operator):
+    """A simple operator that prints buffer information."""
+
+    def __init__(self, fragment, *args, **kwargs):
+        super().__init__(fragment, *args, **kwargs)
+
+    def setup(self, spec: OperatorSpec):
+        """Setup the operator."""
+        spec.input("buffer")
+
+    def compute(self, op_input, op_output, context):
+        """Compute method to print buffer information."""
+        buffer_info = op_input.receive("buffer")
+
+        if buffer_info is None or buffer_info.buffer is None:
+            print("Error: Buffer is null")
+            return
+
+        enabled_channels = 1
+        device_name = "cf-ad9361-dds-core-lpc"
+        channel_name = "voltage0"
+        channel_name2 = "voltage1"
+
+        ctx = iio.Context(_context=G_URI)
+        dev = ctx.find_device(device_name)
+        if dev is None:
+            print(f"Device {device_name} was not found.")
+            return
+
+        chn = dev.find_channel(channel_name, True)  # True = output channel
+        chn2 = dev.find_channel(
+            channel_name2, True) if enabled_channels == 2 else None
+
+        # Convert buffer data back to int16 samples
+        buffer_data = buffer_info.buffer
+        samples = []
+
+        for i in range(0, len(buffer_data), 2):
+            if i + 1 < len(buffer_data):
+                sample = struct.unpack('<h', buffer_data[i:i+2])[0]
+                samples.append(sample)
+
+        # Print the buffer info
+        print(f"Buffer info: samples_count = {buffer_info.samples_count}")
+
+        # Print first few samples (matching C++ behavior)
+        print(" ".join(str(sample)
+              for sample in samples[:min(len(samples), 20)]))
+        if len(samples) > 20:
+            print("... (truncated)")
+
+
 class MyApp(Application):
     def __init__(self, *args, **kwargs):
         """Init the application."""
@@ -200,7 +252,37 @@ class MyApp(Application):
         self.add_flow(basic_emit_op, iio_write, {("value", "value")})
 
     def buffer_read_example(self):
-        pass
+        """Example for buffer read operations matching the C++ implementation."""
+
+        # Create condition for IIO operations
+        iio_rw_cond = CountCondition(self, 1)
+
+        # Channel configuration matching C++ implementation
+        enabled_channels_names_1 = ["voltage0"]
+        enabled_channels_input = [False]  # False for input channels
+
+        # Create IIO buffer read operator
+        iio_buf_read_op = IIOBufferRead(
+            self,
+            iio_rw_cond,
+            ctx=G_URI,
+            dev="cf-ad9361-lpc",
+            is_cyclic=True,
+            samples_count=8192,
+            enabled_channel_names=enabled_channels_names_1,
+            enabled_channel_input=enabled_channels_input,
+            name="iio_buffer_read"
+        )
+
+        # Create buffer printer operator
+        basic_buffer_printer_op = BasicBufferPrinterOp(
+            self,
+            name="basic_buffer_printer_op"
+        )
+
+        # RX flow - connect buffer reader to buffer printer
+        self.add_flow(iio_buf_read_op, basic_buffer_printer_op,
+                      {("buffer", "buffer")})
 
     def buffer_write_example(self):
         """Example for buffer write operations matching the C++ implementation."""
@@ -211,9 +293,9 @@ class MyApp(Application):
         # Channel configuration matching C++ implementation
         # "voltage1" commented out like in C++
         enabled_channels_names_1 = ["voltage0"]
-        enabled_channels_names_2 = ["voltage2"]
+        # enabled_channels_names_2 = ["voltage2"]
         enabled_channels_output = [True]  # True for output channels
-        enabled_channels_input = [False]  # False for input channels
+        # enabled_channels_input = [False]  # False for input channels
 
         # Create IIO buffer write operator 1
         iio_buf_write_op_1 = IIOBufferWrite(
@@ -225,18 +307,6 @@ class MyApp(Application):
             enabled_channel_names=enabled_channels_names_1,
             enabled_channel_output=enabled_channels_output,
             name="iio_buffer_write_1"
-        )
-
-        # Create IIO buffer write operator 2 (not used in current flow but matches C++)
-        iio_buf_write_op_2 = IIOBufferWrite(
-            self,
-            iio_rw_cond,
-            ctx=G_URI,
-            dev="cf-ad9361-dds-core-lpc",
-            is_cyclic=True,
-            enabled_channel_names=enabled_channels_names_2,
-            enabled_channel_output=enabled_channels_output,
-            name="iio_buffer_write_2"
         )
 
         # Create buffer emitter operator
@@ -263,7 +333,8 @@ class MyApp(Application):
         """Compose the application."""
         # self.attr_read_example()
         # self.attr_write_example()
-        self.buffer_write_example()
+        # self.buffer_write_example()
+        self.buffer_read_example()
 
 
 if __name__ == "__main__":

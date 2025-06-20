@@ -41,5 +41,9 @@ find_library(
 
 include(pybind11_add_holohub_module)
 pybind11_add_holohub_module(
-  CPP_CMAKE_TARGET iio_controller CLASS_NAME
-  "IIOAttributeRead, IIOAttributeWrite" SOURCES iio_controller_py.cpp)
+  CPP_CMAKE_TARGET
+  iio_controller
+  CLASS_NAME
+  "IIOAttributeRead, IIOAttributeWrite, IIOBufferInfo, IIOBufferRead, IIOBufferWrite, IIOConfigurator"
+  SOURCES
+  iio_controller_py.cpp)

@@ -13,6 +13,8 @@
 // limitations under the License.
 
 #include <string>
+#include <cstring>
+#include <memory>
 
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
@@ -20,12 +22,14 @@
 #include <holoscan/core/fragment.hpp>
 #include <holoscan/core/operator.hpp>
 #include <holoscan/core/operator_spec.hpp>
+#include <holoscan/python/core/emitter_receiver_registry.hpp>
 #include "../../operator_util.hpp"
 
 #include "../cpp/iio_attribute_read.hpp"
 #include "../cpp/iio_attribute_write.hpp"
 #include "../cpp/iio_buffer_read.hpp"
 #include "../cpp/iio_buffer_write.hpp"
+#include "../cpp/iio_params.hpp"
 
 #include "iio_configurator.hpp"
 #include "iio_controller_pydoc.hpp"
@@ -35,13 +39,56 @@ using pybind11::literals::operator""_a;
 
 namespace py = pybind11;
 
+namespace holoscan {
+
+// Emitter/receiver implementation for iio_buffer_info_t
+template <>
+struct emitter_receiver<std::shared_ptr<iio_buffer_info_t>> {
+  static void emit(py::object& data, const std::string& name, PyOutputContext& op_output,
+                   const int64_t acq_timestamp = -1) {
+    // Convert Python IIOBufferInfo to std::shared_ptr<iio_buffer_info_t>
+    auto py_buffer_info = data.cast<iio_buffer_info_t>();
+    auto buffer_info = std::make_shared<iio_buffer_info_t>(py_buffer_info);
+    py::gil_scoped_release release;
+    op_output.emit<std::shared_ptr<iio_buffer_info_t>>(buffer_info, name.c_str(), acq_timestamp);
+    return;
+  }
+
+  static py::object receive(std::any result, const std::string& name, PyInputContext& op_input) {
+    HOLOSCAN_LOG_DEBUG("py_receive: std::shared_ptr<iio_buffer_info_t> case");
+    auto buffer_info = std::any_cast<std::shared_ptr<iio_buffer_info_t>>(result);
+    py::object py_buffer_info = py::cast(*buffer_info);
+    return py_buffer_info;
+  }
+};
+
+template <>
+struct emitter_receiver<iio_buffer_info_t> {
+  static void emit(py::object& data, const std::string& name, PyOutputContext& op_output,
+                   const int64_t acq_timestamp = -1) {
+    auto buffer_info = data.cast<iio_buffer_info_t>();
+    py::gil_scoped_release release;
+    op_output.emit<iio_buffer_info_t>(buffer_info, name.c_str(), acq_timestamp);
+    return;
+  }
+
+  static py::object receive(std::any result, const std::string& name, PyInputContext& op_input) {
+    HOLOSCAN_LOG_DEBUG("py_receive: iio_buffer_info_t case");
+    auto buffer_info = std::any_cast<iio_buffer_info_t>(result);
+    py::object py_buffer_info = py::cast(buffer_info);
+    return py_buffer_info;
+  }
+};
+
+}  // namespace holoscan
+
 namespace holoscan::ops {
 
 class PyIIOAttributeRead : public IIOAttributeRead {
  public:
   using IIOAttributeRead::IIOAttributeRead;
 
-  PyIIOAttributeRead(Fragment* fragment, const py::args& args, std::string ctx,
+  PyIIOAttributeRead(holoscan::Fragment* fragment, const py::args& args, std::string ctx,
                      std::string attr_name, std::string dev = "", std::string chan = "",
                      bool channel_is_output = false, const std::string& name = "iio_attribute_read")
       : IIOAttributeRead(ArgList{Arg("ctx", ctx),
@@ -61,7 +108,7 @@ class PyIIOAttributeWrite : public IIOAttributeWrite {
  public:
   using IIOAttributeWrite::IIOAttributeWrite;
 
-  PyIIOAttributeWrite(Fragment* fragment, const py::args& args, std::string ctx,
+  PyIIOAttributeWrite(holoscan::Fragment* fragment, const py::args& args, std::string ctx,
                       std::string attr_name, std::string dev = "", std::string chan = "",
                       bool channel_is_output = false,
                       const std::string& name = "iio_attribute_read")
@@ -82,7 +129,7 @@ class PyIIOBufferRead : public IIOBufferRead {
  public:
   using IIOBufferRead::IIOBufferRead;
 
-  PyIIOBufferRead(Fragment* fragment, const py::args& args, std::string ctx, std::string dev,
+  PyIIOBufferRead(holoscan::Fragment* fragment, const py::args& args, std::string ctx, std::string dev,
                   bool is_cyclic, size_t samples_count,
                   std::vector<std::string> enabled_channel_names,
                   std::vector<bool> enabled_channel_output,
@@ -105,7 +152,7 @@ class PyIIOBufferWrite : public IIOBufferWrite {
  public:
   using IIOBufferWrite::IIOBufferWrite;
 
-  PyIIOBufferWrite(Fragment* fragment, const py::args& args, std::string ctx, std::string dev,
+  PyIIOBufferWrite(holoscan::Fragment* fragment, const py::args& args, std::string ctx, std::string dev,
                    bool is_cyclic, std::vector<std::string> enabled_channel_names,
                    std::vector<bool> enabled_channel_output,
                    const std::string& name = "iio_buffer_write")
@@ -126,7 +173,7 @@ class PyIIOConfigurator : public IIOConfigurator {
  public:
   using IIOConfigurator::IIOConfigurator;
 
-  PyIIOConfigurator(Fragment* fragment, const py::args& args, std::string cfg,
+  PyIIOConfigurator(holoscan::Fragment* fragment, const py::args& args, std::string cfg,
                     const std::string& name = "iio_configurator")
       : IIOConfigurator(ArgList{Arg("cfg", cfg)}) {
     add_positional_condition_and_resource_args(this, args);
@@ -150,12 +197,26 @@ PYBIND11_MODULE(_iio_controller, m) {
   m.attr("__version__") = "dev";
 #endif
 
+  py::class_<iio_buffer_info_t>(m, "IIOBufferInfo")
+      .def(py::init<>())
+      .def_readwrite("samples_count", &iio_buffer_info_t::samples_count)
+      .def_property("buffer",
+                    [](const iio_buffer_info_t& self) -> py::bytes {
+                      if (self.buffer == nullptr) return py::bytes();
+                      return py::bytes(static_cast<char*>(self.buffer), self.samples_count * sizeof(int16_t));
+                    },
+                    [](iio_buffer_info_t& self, py::bytes data) {
+                      std::string str_data = data;
+                      self.buffer = malloc(str_data.size());
+                      std::memcpy(self.buffer, str_data.data(), str_data.size());
+                    });
+
   py::class_<IIOAttributeRead,
              PyIIOAttributeRead,
              holoscan::Operator,
              std::shared_ptr<IIOAttributeRead>>(
-      m, "IIOAttributeRead", doc::IIOAttributeRead::doc_IIOAttributeRead_python)
-      .def(py::init<Fragment*,
+      m, "IIOAttributeRead", holoscan::doc::IIOAttributeRead::doc_IIOAttributeRead_python)
+      .def(py::init<holoscan::Fragment*,
                     const py::args&,
                     std::string,
                     std::string,
@@ -170,14 +231,14 @@ PYBIND11_MODULE(_iio_controller, m) {
            "chan"_a = ""s,
            "channel_is_output"_a = false,
            "name"_a = "iio_attribute_read"s,
-           doc::IIOAttributeRead::doc_IIOAttributeRead_python)
-      .def("initialize", &IIOAttributeRead::initialize, doc::IIOAttributeRead::doc_initialize);
+           holoscan::doc::IIOAttributeRead::doc_IIOAttributeRead_python)
+      .def("initialize", &IIOAttributeRead::initialize, holoscan::doc::IIOAttributeRead::doc_initialize);
 
   py::class_<IIOAttributeWrite,
              PyIIOAttributeWrite,
              holoscan::Operator,
              std::shared_ptr<IIOAttributeWrite>>(
-      m, "IIOAttributeWrite", doc::IIOAttributeWrite::doc_IIOAttributeWrite_python)
+      m, "IIOAttributeWrite", holoscan::doc::IIOAttributeWrite::doc_IIOAttributeWrite_python)
       .def(py::init<Fragment*,
                     const py::args&,
                     std::string,
@@ -193,11 +254,11 @@ PYBIND11_MODULE(_iio_controller, m) {
            "chan"_a = ""s,
            "channel_is_output"_a = false,
            "name"_a = "iio_attribute_write"s,
-           doc::IIOAttributeWrite::doc_IIOAttributeWrite_python)
-      .def("initialize", &IIOAttributeWrite::initialize, doc::IIOAttributeWrite::doc_initialize);
+           holoscan::doc::IIOAttributeWrite::doc_IIOAttributeWrite_python)
+      .def("initialize", &IIOAttributeWrite::initialize, holoscan::doc::IIOAttributeWrite::doc_initialize);
 
   py::class_<IIOBufferWrite, PyIIOBufferWrite, holoscan::Operator, std::shared_ptr<IIOBufferWrite>>(
-      m, "IIOBufferWrite", doc::IIOBufferWrite::doc_IIOBufferWrite_python)
+      m, "IIOBufferWrite", holoscan::doc::IIOBufferWrite::doc_IIOBufferWrite_python)
       .def(py::init<Fragment*,
                     const py::args&,
                     std::string,
@@ -213,11 +274,11 @@ PYBIND11_MODULE(_iio_controller, m) {
            "enabled_channel_names"_a,
            "enabled_channel_output"_a,
            "name"_a = "iio_buffer_write"s,
-           doc::IIOBufferWrite::doc_IIOBufferWrite_python)
-      .def("initialize", &IIOBufferWrite::initialize, doc::IIOBufferWrite::doc_initialize);
+           holoscan::doc::IIOBufferWrite::doc_IIOBufferWrite_python)
+      .def("initialize", &IIOBufferWrite::initialize, holoscan::doc::IIOBufferWrite::doc_initialize);
 
   py::class_<IIOBufferRead, PyIIOBufferRead, holoscan::Operator, std::shared_ptr<IIOBufferRead>>(
-      m, "IIOBufferRead", doc::IIOBufferRead::doc_IIOBufferRead_python)
+      m, "IIOBufferRead", holoscan::doc::IIOBufferRead::doc_IIOBufferRead_python)
       .def(py::init<Fragment*,
                     const py::args&,
                     std::string,
@@ -235,8 +296,8 @@ PYBIND11_MODULE(_iio_controller, m) {
            "enabled_channel_names"_a,
            "enabled_channel_input"_a,
            "name"_a = "iio_buffer_read"s,
-           doc::IIOBufferRead::doc_IIOBufferRead_python)
-      .def("initialize", &IIOBufferRead::initialize, doc::IIOBufferRead::doc_initialize);
+           holoscan::doc::IIOBufferRead::doc_IIOBufferRead_python)
+      .def("initialize", &IIOBufferRead::initialize, holoscan::doc::IIOBufferRead::doc_initialize);
 
   py::class_<IIOConfigurator,
              PyIIOConfigurator,
@@ -247,6 +308,12 @@ PYBIND11_MODULE(_iio_controller, m) {
            "fragment"_a,
            "cfg"_a,
            "name"_a = "iio_configurator"s,
-           doc::IIOConfigurator::doc_IIOConfigurator_python);
+           holoscan::doc::IIOConfigurator::doc_IIOConfigurator_python);
+
+  // Register custom types with the emitter/receiver registry
+  m.def("register_types", [](holoscan::EmitterReceiverRegistry& registry) {
+    registry.add_emitter_receiver<iio_buffer_info_t>("iio_buffer_info_t"s);
+    registry.add_emitter_receiver<std::shared_ptr<iio_buffer_info_t>>("std::shared_ptr<iio_buffer_info_t>"s);
+  });
 }  // PYBIND11_MODULE
 }  // namespace holoscan::ops

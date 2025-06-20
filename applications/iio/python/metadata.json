@@ -29,7 +29,7 @@
 			}]
 		},
 		"run": {
-			"command": "python3 <holohub_app_bin>/iio.py",
+			"command": "python3 <holohub_app_bin>/iio_app.py",
 			"workdir": "holohub_app_bin"
 		}
 	}

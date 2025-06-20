@@ -18,6 +18,8 @@ static constexpr const char* G_URI = "ip:192.168.2.1";
 
 namespace holoscan::ops {
 
+// FIXME: General, do stop the flow execution if the context is not found on all iio ops
+
 class BasicPrinterOp : public Operator {
  public:
   HOLOSCAN_OPERATOR_FORWARD_ARGS(BasicPrinterOp);

@@ -13,18 +13,21 @@
 // limitations under the License.
 
 #include "iio_buffer_read.hpp"
-#include <iio.h>
 #include <gxf/core/gxf.h>
+#include <iio.h>
 #include "iio_params.hpp"
 
 using namespace holoscan::ops;
 
-IIOBufferRead::~IIOBufferRead() {
+void IIOBufferRead::stop() {
+  HOLOSCAN_LOG_INFO("IIOBufferRead stop");
   if (buffer_) {
     iio_buffer_destroy(buffer_);
+    buffer_ = nullptr;
   }
   if (ctx_) {
     iio_context_destroy(ctx_);
+    ctx_ = nullptr;
   }
 }
 

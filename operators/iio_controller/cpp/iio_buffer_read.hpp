@@ -28,8 +28,9 @@ class IIOBufferRead : public Operator {
   HOLOSCAN_OPERATOR_FORWARD_ARGS(IIOBufferRead);
 
   IIOBufferRead() = default;
-  ~IIOBufferRead();
+  ~IIOBufferRead() = default;
 
+  void stop() override;
   void setup(OperatorSpec& spec) override;
   void initialize() override;
   void compute(InputContext& op_input, OutputContext& op_output, ExecutionContext& ec) override;
@@ -46,7 +47,7 @@ class IIOBufferRead : public Operator {
   iio_device* dev_;
   iio_buffer* buffer_;
   size_t sample_size_;
-  
+
   // Error flags for initialization failures
   bool ctx_empty_ = false;
   bool dev_empty_ = false;

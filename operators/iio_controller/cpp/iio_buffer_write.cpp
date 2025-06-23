@@ -13,23 +13,24 @@
 // limitations under the License.
 
 #include "iio_buffer_write.hpp"
+#include <gxf/core/gxf.h>
 #include <iio.h>
 #include <unistd.h>
 #include <cstdint>
-#include <gxf/core/gxf.h>
 #include <holoscan/logger/logger.hpp>
 #include <memory>
 #include "iio_params.hpp"
 
 using namespace holoscan::ops;
 
-// FIXME: This should not be in the destructor, the python bindings can break, see documentation
-IIOBufferWrite::~IIOBufferWrite() {
+void IIOBufferWrite::stop() {
   if (buffer_) {
     iio_buffer_destroy(buffer_);
+    buffer_ = nullptr;
   }
   if (ctx_) {
     iio_context_destroy(ctx_);
+    ctx_ = nullptr;
   }
 }
 

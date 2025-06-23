@@ -13,8 +13,8 @@
 // limitations under the License.
 
 #include "iio_attribute_read.hpp"
-#include <iio.h>
 #include <gxf/core/gxf.h>
+#include <iio.h>
 
 using namespace holoscan::ops;
 
@@ -65,7 +65,8 @@ void IIOAttributeRead::initialize() {
   if (dev_ && !chan_p_.get().empty()) {
     chan_ = iio_device_find_channel(dev_, chan_p_.get().c_str(), channel_is_output_.get());
     if (chan_ == nullptr) {
-      HOLOSCAN_LOG_ERROR("Failed to find IIO channel: {} (output: {})", chan_p_.get(), channel_is_output_.get());
+      HOLOSCAN_LOG_ERROR(
+          "Failed to find IIO channel: {} (output: {})", chan_p_.get(), channel_is_output_.get());
       chan_not_found_ = true;
       return;
     }

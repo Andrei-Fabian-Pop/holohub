@@ -6,7 +6,7 @@ from typing import List
 
 from holoscan.core import Application, Operator, OperatorSpec
 from holoscan.conditions import CountCondition
-from holohub.iio_controller import IIOAttributeRead, IIOAttributeWrite, IIOBufferWrite, IIOBufferRead, IIOBufferInfo
+from holohub.iio_controller import IIOAttributeRead, IIOAttributeWrite, IIOConfigurator, IIOBufferWrite, IIOBufferRead, IIOBufferInfo
 
 G_NUM_REPETITIONS = 10
 G_URI = "ip:192.168.2.1"
@@ -327,18 +327,25 @@ class MyApp(Application):
         self.add_flow(iio_buf_write_op_1, basic_wait_op)
 
     def configurator_example(self):
-        pass
+        config_file_path = self.config().config_file
+        print(f"Config file: {config_file_path}")
+        iio_configurator = IIOConfigurator(
+            self, name="iio_configurator_op", cfg=config_file_path)
+
+        # self.start_op() will only run the configurator once
+        self.add_flow(self.start_op(), iio_configurator)
 
     def compose(self):
         """Compose the application."""
         # self.attr_read_example()
         # self.attr_write_example()
         # self.buffer_write_example()
-        self.buffer_read_example()
+        # self.buffer_read_example()
+        self.configurator_example()
 
 
 if __name__ == "__main__":
-    config_file = os.path.join(os.path.dirname(__file__), "../iio_config.yaml")
+    config_file = os.path.join(os.path.dirname(__file__), "iio_config.yaml")
     app = MyApp()
     app.config(config_file)
     app.run()

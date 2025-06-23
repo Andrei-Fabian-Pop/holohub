@@ -175,67 +175,52 @@ class BasicWaitOp : public Operator {
 
 class App : public holoscan::Application {
  public:
-  void compose() override {
-    HOLOSCAN_LOG_INFO("IIO Compose started");
+  App() { name_ = "IIOController Examples"; }
+
+  void attr_read_example() {
     using namespace holoscan;
+    HOLOSCAN_LOG_INFO("Setting up attribute read example");
 
-    auto stop_init_cond = make_condition<holoscan::BooleanCondition>("is_init");
+    auto iio_read_cond = make_condition<CountCondition>("iio_read_cond", G_NUM_READS);
 
-    auto iio_rw_cond = make_condition<holoscan::CountCondition>("iio_read_cond", 1);
-    // auto iio_read_op =
-    //     make_operator<ops::IIOAttributeRead>("iio_attribute_read",
-    //                                          Arg("ctx") = std::string(G_URI),
-    //                                          Arg("dev") = std::string("ad9361-phy"),
-    //                                          // Arg("chan") = std::string("voltage0"),
-    //                                          // Arg("channel_is_output") = true,
-    //                                          Arg("attr_name") = std::string("calib_mode"),
-    //                                          iio_rw_cond);
+    auto iio_read_op =
+        make_operator<ops::IIOAttributeRead>("iio_attribute_read",
+                                             Arg("ctx") = std::string(G_URI),
+                                             Arg("dev") = std::string("ad9361-phy"),
+                                             Arg("attr_name") = std::string("trx_rate_governor"),
+                                             iio_read_cond);
 
-    // auto iio_write_op =
-    //     make_operator<ops::IIOAttributeWrite>("iio_attribute_write",
-    //                                           Arg("ctx") = std::string(G_URI),
-    //                                           Arg("dev") = std::string("ad9361-phy"),
-    //                                           // Arg("chan") = std::string("voltage0"),
-    //                                           // Arg("channel_is_output") = true,
-    //                                           Arg("attr_name") = std::string("calib_mode"),
-    //                                           iio_rw_cond);
+    auto basic_print_op = make_operator<ops::BasicPrinterOp>("basic_print_op");
 
-    std::vector<std::string> enabled_channels_names_1 = {
-        "voltage0",
-        // "voltage1",
-    };
+    add_flow(iio_read_op, basic_print_op, {{"value", "value"}});
+  }
 
-    std::vector<std::string> enabled_channels_names_2 = {
-        "voltage2",
-    };
+  void attr_write_example() {
+    using namespace holoscan;
+    HOLOSCAN_LOG_INFO("Setting up attribute write example");
 
-    std::vector<bool> enabled_channels_output = {
-        true,
-        // true,
-    };
+    auto iio_write_cond = make_condition<CountCondition>("iio_write_cond", G_NUM_READS);
 
-    std::vector<bool> enabled_channels_input = {
-        false,
-        // false,
-    };
+    auto iio_write_op =
+        make_operator<ops::IIOAttributeWrite>("iio_attribute_write",
+                                              Arg("ctx") = std::string(G_URI),
+                                              Arg("dev") = std::string("ad9361-phy"),
+                                              Arg("attr_name") = std::string("trx_rate_governor"),
+                                              iio_write_cond);
 
-    auto iio_buf_write_op_1 =
-        make_operator<ops::IIOBufferWrite>("iio_buffer_write_1",
-                                           Arg("ctx") = std::string(G_URI),
-                                           Arg("dev") = std::string("cf-ad9361-dds-core-lpc"),
-                                           Arg("is_cyclic") = true,
-                                           Arg("enabled_channel_names") = enabled_channels_names_1,
-                                           Arg("enabled_channel_output") = enabled_channels_output,
-                                           iio_rw_cond);
+    auto basic_emit_op = make_operator<ops::BasicEmitterOp>("basic_emit_op");
 
-    auto iio_buf_write_op_2 =
-        make_operator<ops::IIOBufferWrite>("iio_buffer_write_2",
-                                           Arg("ctx") = std::string(G_URI),
-                                           Arg("dev") = std::string("cf-ad9361-dds-core-lpc"),
-                                           Arg("is_cyclic") = true,
-                                           Arg("enabled_channel_names") = enabled_channels_names_2,
-                                           Arg("enabled_channel_output") = enabled_channels_output,
-                                           iio_rw_cond);
+    add_flow(basic_emit_op, iio_write_op, {{"value", "value"}});
+  }
+
+  void buffer_read_example() {
+    using namespace holoscan;
+    HOLOSCAN_LOG_INFO("Setting up buffer read example");
+
+    auto iio_rw_cond = make_condition<CountCondition>("iio_read_cond", 1);
+
+    std::vector<std::string> enabled_channels_names_1 = {"voltage0"};
+    std::vector<bool> enabled_channels_input = {false};  // False for input channels
 
     auto iio_buf_read_op =
         make_operator<ops::IIOBufferRead>("iio_buffer_read",
@@ -247,34 +232,70 @@ class App : public holoscan::Application {
                                           Arg("enabled_channel_output") = enabled_channels_input,
                                           iio_rw_cond);
 
-    // auto basic_printer_op = make_operator<ops::BasicPrinterOp>("basic_printer_op");
-    // auto basic_emitter_op = make_operator<ops::BasicEmitterOp>("basic_emitter_op");
-    auto basic_buffer_emitter_op =
-        make_operator<ops::BasicIIOBufferEmitterOP>("basic_buffer_emitter_op");
     auto basic_buffer_printer_op =
         make_operator<ops::BasicIIOBufferPrinterOP>("basic_buffer_printer_op");
 
+    // RX flow - connect buffer reader to buffer printer
+    add_flow(iio_buf_read_op, basic_buffer_printer_op, {{"buffer", "buffer"}});
+  }
+
+  void buffer_write_example() {
+    using namespace holoscan;
+    HOLOSCAN_LOG_INFO("Setting up buffer write example");
+
+    auto iio_rw_cond = make_condition<CountCondition>("iio_write_cond", 1);
+
+    // Channel configuration matching Python implementation
+    // "voltage1" commented out like in Python
+    std::vector<std::string> enabled_channels_names_1 = {"voltage0"};
+    std::vector<bool> enabled_channels_output = {true};  // True for output channels
+
+    auto iio_buf_write_op_1 =
+        make_operator<ops::IIOBufferWrite>("iio_buffer_write_1",
+                                           Arg("ctx") = std::string(G_URI),
+                                           Arg("dev") = std::string("cf-ad9361-dds-core-lpc"),
+                                           Arg("is_cyclic") = true,
+                                           Arg("enabled_channel_names") = enabled_channels_names_1,
+                                           Arg("enabled_channel_output") = enabled_channels_output,
+                                           iio_rw_cond);
+
+    auto basic_buffer_emitter_op =
+        make_operator<ops::BasicIIOBufferEmitterOP>("basic_buffer_emitter_op");
+
     auto basic_wait_op = make_operator<ops::BasicWaitOp>("basic_wait_op");
 
-    // Write attr flow
-    // add_flow(basic_emitter_op, iio_write_op, {{"value", "value"}});
-
-    // Secondary flow, just for system setup
-    // auto config_file_path = config().config_file();
-    // auto iio_configurator_op = make_operator<ops::IIOConfigurator>(
-    //     "iio_configurator_op", Arg("cfg") = std::string(config_file_path));
-    // add_flow(start_op(), iio_configurator_op);
-
-    // TX flow
+    // TX flow - connect buffer emitter to buffer writer to wait
     add_flow(basic_buffer_emitter_op, iio_buf_write_op_1, {{"buffer", "buffer"}});
     add_flow(iio_buf_write_op_1, basic_wait_op);
-
-    // add_flow(iio_buf_write_op_1, iio_buf_read_op, {{"buffer", "buffer"}});
-    // add_flow(iio_buf_read_op, iio_buf_write_op_2, {{"buffer", "buffer"}});
-
-    // RX flow
-    // add_flow(iio_buf_read_op, basic_buffer_printer_op, {{"buffer", "buffer"}});
   }
+
+  void configurator_example() {
+    using namespace holoscan;
+    HOLOSCAN_LOG_INFO("Setting up configurator example");
+
+    auto config_file_path = config().config_file();
+    HOLOSCAN_LOG_INFO("Config file: {}", config_file_path);
+
+    auto iio_configurator_op = make_operator<ops::IIOConfigurator>(
+        "iio_configurator_op", Arg("cfg") = std::string(config_file_path));
+
+    // start_op() will only run the configurator once
+    add_flow(start_op(), iio_configurator_op);
+  }
+
+  void compose() override {
+    HOLOSCAN_LOG_INFO("IIO Compose started");
+
+    // Uncomment the examples you want to run
+    // attr_read_example();
+    // attr_write_example();
+    // buffer_write_example();
+    buffer_read_example();
+    // configurator_example();
+  }
+
+ private:
+  std::string name_;
 };
 
 int main(int argc, char** argv) {

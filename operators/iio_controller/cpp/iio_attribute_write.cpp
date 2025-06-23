@@ -73,7 +73,7 @@ void IIOAttributeWrite::initialize() {
 }
 
 void IIOAttributeWrite::compute(InputContext& op_input, OutputContext&, ExecutionContext&) {
-  HOLOSCAN_LOG_INFO("IIOAttributeWrite compute");
+  HOLOSCAN_LOG_DEBUG("IIOAttributeWrite compute");
   auto value_expected = op_input.receive<std::string>("value");
 
   if (!value_expected.has_value()) {

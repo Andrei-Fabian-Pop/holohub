@@ -46,6 +46,13 @@ class IIOBufferWrite : public Operator {
   iio_buffer* buffer_ = nullptr;
   uint32_t buffer_samples_count_ = 0;
   ssize_t sample_size_ = 0;
+  
+  // Error flags for initialization failures
+  bool channels_empty_ = false;
+  bool ctx_creation_failed_ = false;
+  bool dev_not_found_ = false;
+  bool chan_not_found_ = false;
+  bool sample_size_failed_ = false;
 };
 
 }  // namespace holoscan::ops

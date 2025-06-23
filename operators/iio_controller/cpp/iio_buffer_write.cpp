@@ -16,6 +16,7 @@
 #include <iio.h>
 #include <unistd.h>
 #include <cstdint>
+#include <gxf/core/gxf.h>
 #include <holoscan/logger/logger.hpp>
 #include <memory>
 #include "iio_params.hpp"
@@ -59,18 +60,21 @@ void IIOBufferWrite::initialize() {
     HOLOSCAN_LOG_ERROR(
         "It is mandatory to enable at least one channel before creating the "
         "IIO buffer.");
+    channels_empty_ = true;
     return;
   }
 
   ctx_ = iio_create_context_from_uri(ctx_p_.get().c_str());
   if (!ctx_) {
-    HOLOSCAN_LOG_ERROR("Failed to create context with uri {}", ctx_p_.get());
+    HOLOSCAN_LOG_ERROR("Failed to create IIO context from URI: {}", ctx_p_.get());
+    ctx_creation_failed_ = true;
     return;
   }
 
   dev_ = iio_context_find_device(ctx_, dev_p_.get().c_str());
   if (!dev_) {
-    HOLOSCAN_LOG_ERROR("Failed to find device {}", dev_p_.get());
+    HOLOSCAN_LOG_ERROR("Failed to find IIO device: {}", dev_p_.get());
+    dev_not_found_ = true;
     return;
   }
 
@@ -85,6 +89,7 @@ void IIOBufferWrite::initialize() {
                          chn_type ? "output" : "input",
                          chn_name,
                          dev_p_.get());
+      chan_not_found_ = true;
       return;
     }
 
@@ -102,14 +107,42 @@ void IIOBufferWrite::initialize() {
   if (sample_size_ < 0) {
     HOLOSCAN_LOG_ERROR(
         "Failed to get sample size from device {}; Err code: {}", dev_p_.get(), sample_size_);
+    sample_size_failed_ = true;
     return;
   }
 
   buffer_ = nullptr;
 }
 
-void IIOBufferWrite::compute(InputContext& op_input, OutputContext&, ExecutionContext&) {
+void IIOBufferWrite::compute(InputContext& op_input, OutputContext&, ExecutionContext& context) {
   HOLOSCAN_LOG_INFO("IIOBufferWrite compute");
+
+  // Check if initialization failed and interrupt graph execution
+  if (channels_empty_) {
+    HOLOSCAN_LOG_ERROR("Cannot proceed: No channels enabled for IIO buffer");
+    GxfGraphInterrupt(context.context());
+    return;
+  }
+  if (ctx_creation_failed_) {
+    HOLOSCAN_LOG_ERROR("Cannot proceed: IIO context creation failed for URI: {}", ctx_p_.get());
+    GxfGraphInterrupt(context.context());
+    return;
+  }
+  if (dev_not_found_) {
+    HOLOSCAN_LOG_ERROR("Cannot proceed: IIO device '{}' not found", dev_p_.get());
+    GxfGraphInterrupt(context.context());
+    return;
+  }
+  if (chan_not_found_) {
+    HOLOSCAN_LOG_ERROR("Cannot proceed: One or more IIO channels not found");
+    GxfGraphInterrupt(context.context());
+    return;
+  }
+  if (sample_size_failed_) {
+    HOLOSCAN_LOG_ERROR("Cannot proceed: Failed to get sample size from device '{}'", dev_p_.get());
+    GxfGraphInterrupt(context.context());
+    return;
+  }
   auto buffer_info = op_input.receive<std::shared_ptr<iio_buffer_info_t>>("buffer").value();
 
   if (buffer_info->buffer == nullptr) {
@@ -130,6 +163,7 @@ void IIOBufferWrite::compute(InputContext& op_input, OutputContext&, ExecutionCo
     buffer_ = iio_device_create_buffer(dev_, buffer_info->samples_count, is_cyclic.get());
     if (!buffer_) {
       HOLOSCAN_LOG_ERROR("Failed to create buffer, error code {}", errno);
+      GxfGraphInterrupt(context.context());
       return;
     }
   }

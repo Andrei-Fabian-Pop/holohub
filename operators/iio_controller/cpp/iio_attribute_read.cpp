@@ -14,6 +14,7 @@
 
 #include "iio_attribute_read.hpp"
 #include <iio.h>
+#include <gxf/core/gxf.h>
 
 using namespace holoscan::ops;
 
@@ -43,7 +44,8 @@ void IIOAttributeRead::initialize() {
   // Cannot work without a context
   ctx_ = iio_create_context_from_uri(ctx_p_.get().c_str());
   if (!ctx_) {
-    HOLOSCAN_LOG_ERROR("Failed to create context");
+    HOLOSCAN_LOG_ERROR("Failed to create IIO context from URI: {}", ctx_p_.get());
+    ctx_creation_failed_ = true;
     return;
   }
   attr_type_ = attr_type_t::CONTEXT;
@@ -51,7 +53,8 @@ void IIOAttributeRead::initialize() {
   if (!dev_p_.get().empty()) {
     dev_ = iio_context_find_device(ctx_, dev_p_.get().c_str());
     if (dev_ == nullptr) {
-      HOLOSCAN_LOG_ERROR("Failed to find device {}", dev_p_.get());
+      HOLOSCAN_LOG_ERROR("Failed to find IIO device: {}", dev_p_.get());
+      dev_not_found_ = true;
       return;
     }
     attr_type_ = attr_type_t::DEVICE;
@@ -62,7 +65,8 @@ void IIOAttributeRead::initialize() {
   if (dev_ && !chan_p_.get().empty()) {
     chan_ = iio_device_find_channel(dev_, chan_p_.get().c_str(), channel_is_output_.get());
     if (chan_ == nullptr) {
-      HOLOSCAN_LOG_ERROR("Failed to find channel {}", chan_p_.get());
+      HOLOSCAN_LOG_ERROR("Failed to find IIO channel: {} (output: {})", chan_p_.get(), channel_is_output_.get());
+      chan_not_found_ = true;
       return;
     }
     attr_type_ = attr_type_t::CHANNEL;
@@ -71,8 +75,25 @@ void IIOAttributeRead::initialize() {
   }
 }
 
-void IIOAttributeRead::compute(InputContext&, OutputContext& op_output, ExecutionContext&) {
+void IIOAttributeRead::compute(InputContext&, OutputContext& op_output, ExecutionContext& context) {
   HOLOSCAN_LOG_DEBUG("IIOAttributeRead compute");
+
+  // Check if initialization failed and interrupt graph execution
+  if (ctx_creation_failed_) {
+    HOLOSCAN_LOG_ERROR("Cannot proceed: IIO context creation failed for URI: {}", ctx_p_.get());
+    GxfGraphInterrupt(context.context());
+    return;
+  }
+  if (dev_not_found_) {
+    HOLOSCAN_LOG_ERROR("Cannot proceed: IIO device '{}' not found", dev_p_.get());
+    GxfGraphInterrupt(context.context());
+    return;
+  }
+  if (chan_not_found_) {
+    HOLOSCAN_LOG_ERROR("Cannot proceed: IIO channel '{}' not found", chan_p_.get());
+    GxfGraphInterrupt(context.context());
+    return;
+  }
 
   switch (attr_type_) {
     case attr_type_t::CONTEXT: {

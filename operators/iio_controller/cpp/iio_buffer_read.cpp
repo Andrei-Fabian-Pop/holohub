@@ -14,6 +14,7 @@
 
 #include "iio_buffer_read.hpp"
 #include <iio.h>
+#include <gxf/core/gxf.h>
 #include "iio_params.hpp"
 
 using namespace holoscan::ops;
@@ -54,11 +55,13 @@ void IIOBufferRead::initialize() {
 
   if (ctx_p_.get().empty()) {
     HOLOSCAN_LOG_ERROR("IIO Context is not set. Cannot use operator.");
+    ctx_empty_ = true;
     return;
   }
 
   if (dev_p_.get().empty()) {
     HOLOSCAN_LOG_ERROR("IIO Device is not set. Cannot use operator.");
+    dev_empty_ = true;
     return;
   }
 
@@ -66,23 +69,27 @@ void IIOBufferRead::initialize() {
     HOLOSCAN_LOG_ERROR(
         "It is mandatory to enable at least one channel before creating the "
         "IIO buffer.");
+    channels_empty_ = true;
     return;
   }
 
   if (samples_count_p_.get() == 0) {
     HOLOSCAN_LOG_ERROR("Samples count is not set. Cannot use operator.");
+    samples_count_zero_ = true;
     return;
   }
 
   ctx_ = iio_create_context_from_uri(ctx_p_.get().c_str());
   if (!ctx_) {
-    HOLOSCAN_LOG_ERROR("Failed to create context with uri {}", ctx_p_.get());
+    HOLOSCAN_LOG_ERROR("Failed to create IIO context from URI: {}", ctx_p_.get());
+    ctx_creation_failed_ = true;
     return;
   }
 
   dev_ = iio_context_find_device(ctx_, dev_p_.get().c_str());
   if (!dev_) {
-    HOLOSCAN_LOG_ERROR("Failed to find device {}", dev_p_.get());
+    HOLOSCAN_LOG_ERROR("Failed to find IIO device: {}", dev_p_.get());
+    dev_not_found_ = true;
     return;
   }
 
@@ -94,6 +101,7 @@ void IIOBufferRead::initialize() {
     iio_channel* chn = iio_device_find_channel(dev_, chn_name.c_str(), chn_type);
     if (!chn) {
       HOLOSCAN_LOG_ERROR("Failed to find {} channel {}", chn_type ? "output" : "input", chn_name);
+      chan_not_found_ = true;
       return;
     }
 
@@ -108,7 +116,8 @@ void IIOBufferRead::initialize() {
   ssize_t sample_size = iio_device_get_sample_size(dev_);
   if (sample_size < 0) {
     HOLOSCAN_LOG_ERROR(
-        "Failed to get sample size from device {}; Err code: {}", dev_p_.get(), sample_size_);
+        "Failed to get sample size from device {}; Err code: {}", dev_p_.get(), sample_size);
+    sample_size_failed_ = true;
     return;
   }
   sample_size_ = static_cast<size_t>(sample_size);
@@ -116,8 +125,50 @@ void IIOBufferRead::initialize() {
   buffer_ = nullptr;
 }
 
-void IIOBufferRead::compute(InputContext&, OutputContext& op_output, ExecutionContext&) {
+void IIOBufferRead::compute(InputContext&, OutputContext& op_output, ExecutionContext& context) {
   HOLOSCAN_LOG_INFO("IIOBufferRead compute");
+
+  // Check if initialization failed and interrupt graph execution
+  if (ctx_empty_) {
+    HOLOSCAN_LOG_ERROR("Cannot proceed: IIO Context is not set");
+    GxfGraphInterrupt(context.context());
+    return;
+  }
+  if (dev_empty_) {
+    HOLOSCAN_LOG_ERROR("Cannot proceed: IIO Device is not set");
+    GxfGraphInterrupt(context.context());
+    return;
+  }
+  if (channels_empty_) {
+    HOLOSCAN_LOG_ERROR("Cannot proceed: No channels enabled for IIO buffer");
+    GxfGraphInterrupt(context.context());
+    return;
+  }
+  if (samples_count_zero_) {
+    HOLOSCAN_LOG_ERROR("Cannot proceed: Samples count is not set");
+    GxfGraphInterrupt(context.context());
+    return;
+  }
+  if (ctx_creation_failed_) {
+    HOLOSCAN_LOG_ERROR("Cannot proceed: IIO context creation failed for URI: {}", ctx_p_.get());
+    GxfGraphInterrupt(context.context());
+    return;
+  }
+  if (dev_not_found_) {
+    HOLOSCAN_LOG_ERROR("Cannot proceed: IIO device '{}' not found", dev_p_.get());
+    GxfGraphInterrupt(context.context());
+    return;
+  }
+  if (chan_not_found_) {
+    HOLOSCAN_LOG_ERROR("Cannot proceed: One or more IIO channels not found");
+    GxfGraphInterrupt(context.context());
+    return;
+  }
+  if (sample_size_failed_) {
+    HOLOSCAN_LOG_ERROR("Cannot proceed: Failed to get sample size from device '{}'", dev_p_.get());
+    GxfGraphInterrupt(context.context());
+    return;
+  }
   auto buffer_info = std::shared_ptr<iio_buffer_info_t>(new iio_buffer_info_t);
   buffer_info->buffer = nullptr;
   buffer_info->samples_count = 0;
@@ -127,7 +178,8 @@ void IIOBufferRead::compute(InputContext&, OutputContext& op_output, ExecutionCo
         "Creating buffer with {} samples of size {} bytes", samples_count_p_.get(), sample_size_);
     buffer_ = iio_device_create_buffer(dev_, samples_count_p_.get(), false);
     if (!buffer_) {
-      HOLOSCAN_LOG_ERROR("Failed to create buffer, errro code {}", errno);
+      HOLOSCAN_LOG_ERROR("Failed to create buffer, error code {}", errno);
+      GxfGraphInterrupt(context.context());
       return;
     }
   }

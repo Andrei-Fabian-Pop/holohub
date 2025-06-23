@@ -46,6 +46,16 @@ class IIOBufferRead : public Operator {
   iio_device* dev_;
   iio_buffer* buffer_;
   size_t sample_size_;
+  
+  // Error flags for initialization failures
+  bool ctx_empty_ = false;
+  bool dev_empty_ = false;
+  bool channels_empty_ = false;
+  bool samples_count_zero_ = false;
+  bool ctx_creation_failed_ = false;
+  bool dev_not_found_ = false;
+  bool chan_not_found_ = false;
+  bool sample_size_failed_ = false;
 };
 
 }  // namespace holoscan::ops

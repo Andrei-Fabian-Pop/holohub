@@ -15,6 +15,7 @@
 #include "iio_configurator.hpp"
 #include <iio.h>
 #include <yaml-cpp/node/detail/iterator_fwd.h>
+#include <gxf/core/gxf.h>
 #include <holoscan/logger/logger.hpp>
 
 using namespace holoscan::ops;
@@ -44,6 +45,8 @@ void IIOConfigurator::parse_setup(const YAML::Node& setup_node, iio_context* ctx
         iio_device* iio_dev = iio_context_find_device(ctx, dev_name.c_str());
         if (!iio_dev) {
           HOLOSCAN_LOG_ERROR("Failed to find device: {}", dev_name);
+          // Note: Using continue instead of stopping execution for missing devices in setup
+          // as this may be expected for some configurations
           continue;
         }
 
@@ -84,6 +87,8 @@ void IIOConfigurator::parse_device(const YAML::Node& device_node, iio_device* de
           iio_channel* chan = iio_device_find_channel(dev, channel_name.c_str(), false);
           if (!chan) {
             HOLOSCAN_LOG_ERROR("Failed to find input channel: {}", channel_name);
+            // Note: Using continue instead of stopping execution for missing channels in setup
+            // as this may be expected for some configurations
             continue;
           }
 
@@ -100,6 +105,8 @@ void IIOConfigurator::parse_device(const YAML::Node& device_node, iio_device* de
           iio_channel* chan = iio_device_find_channel(dev, channel_name.c_str(), true);
           if (!chan) {
             HOLOSCAN_LOG_ERROR("Failed to find output channel: {}", channel_name);
+            // Note: Using continue instead of stopping execution for missing channels in setup
+            // as this may be expected for some configurations
             continue;
           }
 
@@ -188,7 +195,7 @@ void IIOConfigurator::parse_attribute(const YAML::Node& attr_node, iio_channel* 
   }
 }
 
-void IIOConfigurator::compute(InputContext&, OutputContext&, ExecutionContext&) {
+void IIOConfigurator::compute(InputContext&, OutputContext&, ExecutionContext& context) {
   HOLOSCAN_LOG_INFO("IIOConfigurator compute");
 
   auto config = holoscan::Config(cfg_path_p_.get());
@@ -204,11 +211,15 @@ void IIOConfigurator::compute(InputContext&, OutputContext&, ExecutionContext&) 
       iio_context* ctx = iio_create_context_from_uri(uri.c_str());
       if (ctx == nullptr) {
         HOLOSCAN_LOG_ERROR("Failed to create IIO context from URI: {}", uri);
+        HOLOSCAN_LOG_ERROR("Cannot proceed: IIO context creation failed - stopping graph execution");
+        GxfGraphInterrupt(context.context());
         return;
       }
 
       if (!cfg["setup"]) {
         HOLOSCAN_LOG_ERROR("No setup configuration found in YAML");
+        HOLOSCAN_LOG_ERROR("Cannot proceed: Missing setup configuration - stopping graph execution");
+        GxfGraphInterrupt(context.context());
         return;
       }
 
@@ -219,6 +230,8 @@ void IIOConfigurator::compute(InputContext&, OutputContext&, ExecutionContext&) 
 
   if (!found_cfg) {
     HOLOSCAN_LOG_ERROR("No 'cfg' node found in the YAML configuration file");
+    HOLOSCAN_LOG_ERROR("Cannot proceed: Missing configuration node - stopping graph execution");
+    GxfGraphInterrupt(context.context());
     return;
   }
 }

@@ -92,6 +92,21 @@ class BasicIIOBufferEmitterOP : public Operator {
 
     auto buffer_info = std::shared_ptr<iio_buffer_info_t>(new iio_buffer_info_t);
     buffer_info->buffer = new int16_t[num_samples];  // pluto has a sample size of 2 bytes
+    buffer_info->is_cyclic = true;
+    buffer_info->device_name = device_name;
+
+    // Populate enabled channels
+    iio_channel_info_t ch1_info;
+    ch1_info.name = channel_name;
+    ch1_info.is_output = true;
+    buffer_info->enabled_channels.push_back(ch1_info);
+
+    if (enabled_channels == 2) {
+      iio_channel_info_t ch2_info;
+      ch2_info.name = channel_name2;
+      ch2_info.is_output = true;
+      buffer_info->enabled_channels.push_back(ch2_info);
+    }
 
     for (size_t i = 0; i < num_samples; i += enabled_channels) {
       static_cast<int16_t*>(buffer_info->buffer)[i] = data_vector[i / enabled_channels];
@@ -152,9 +167,23 @@ class BasicIIOBufferPrinterOP : public Operator {
       }
     }
 
-    // Print the buffer info
-    HOLOSCAN_LOG_INFO("Buffer info: samples_count = {}", buffer_info->samples_count);
-    for (size_t i = 0; i < buffer_info->samples_count; ++i) {
+    // Print the buffer info including new fields
+    HOLOSCAN_LOG_INFO(
+        "Buffer info: samples_count = {}, device = {}, cyclic = {}, enabled_channels = {}",
+        buffer_info->samples_count,
+        buffer_info->device_name,
+        buffer_info->is_cyclic,
+        buffer_info->enabled_channels.size());
+
+    // Print channel information
+    for (const auto& ch : buffer_info->enabled_channels) {
+      HOLOSCAN_LOG_INFO("  Channel: {} ({})", ch.name, ch.is_output ? "output" : "input");
+    }
+
+    // Print first few samples
+    const size_t samples_to_print = 100;
+    HOLOSCAN_LOG_INFO("First {} samples:", samples_to_print);
+    for (size_t i = 0; i < std::min(samples_to_print, buffer_info->samples_count); ++i) {
       std::cout << static_cast<int16_t*>(buffer_info->buffer)[i] << " ";
     }
     std::cout << std::endl;
@@ -245,8 +274,8 @@ class App : public holoscan::Application {
 
     auto iio_rw_cond = make_condition<CountCondition>("iio_write_cond", 1);
 
-    // Channel configuration matching Python implementation
-    // "voltage1" commented out like in Python
+    // FIXME: If adding voltage1/true to the list, the example does not work
+    // due to a sample size mismatch
     std::vector<std::string> enabled_channels_names_1 = {"voltage0"};
     std::vector<bool> enabled_channels_output = {true};  // True for output channels
 
@@ -289,8 +318,8 @@ class App : public holoscan::Application {
     // Uncomment the examples you want to run
     // attr_read_example();
     // attr_write_example();
-    // buffer_write_example();
-    buffer_read_example();
+    buffer_write_example();
+    // buffer_read_example();
     // configurator_example();
   }
 

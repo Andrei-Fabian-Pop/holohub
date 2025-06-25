@@ -14,6 +14,8 @@
 
 #pragma once
 #include <iio.h>
+#include <string>
+#include <vector>
 
 enum class attr_type_t {
   CONTEXT,
@@ -22,7 +24,15 @@ enum class attr_type_t {
   UNKNOWN,
 };
 
+struct iio_channel_info_t {
+  std::string name;
+  bool is_output;  // true for output channel, false for input channel
+};
+
 struct iio_buffer_info_t {
   size_t samples_count;
   void* buffer;
+  std::vector<iio_channel_info_t> enabled_channels;
+  bool is_cyclic;
+  std::string device_name;
 };

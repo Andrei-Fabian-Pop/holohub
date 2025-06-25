@@ -6,7 +6,7 @@ from typing import List
 
 from holoscan.core import Application, Operator, OperatorSpec
 from holoscan.conditions import CountCondition
-from holohub.iio_controller import IIOAttributeRead, IIOAttributeWrite, IIOConfigurator, IIOBufferWrite, IIOBufferRead, IIOBufferInfo
+from holohub.iio_controller import IIOAttributeRead, IIOAttributeWrite, IIOConfigurator, IIOBufferWrite, IIOBufferRead, IIOBufferInfo, IIOChannelInfo
 
 G_NUM_REPETITIONS = 10
 G_URI = "ip:192.168.2.1"
@@ -123,8 +123,8 @@ class BasicIIOBufferEmitterOp(Operator):
             # Pack the sample into the buffer
             struct.pack_into('<h', buffer_data, i * 2, sample0)
 
-            # Apply channel conversion if needed (simplified - the actual conversion
-            # would require proper IIO channel conversion which is complex in Python)
+            # Apply channel conversion if needed (simplified - the actual
+            # conversion would require proper IIO channel conversion
 
             if enabled_channels == 2:
                 sample1 = data_vector2[sample_idx]
@@ -134,6 +134,20 @@ class BasicIIOBufferEmitterOp(Operator):
         # 1 sample contains samples for all channels
         buffer_info.samples_count = num_samples // enabled_channels
         buffer_info.buffer = bytes(buffer_data)
+        buffer_info.is_cyclic = True
+        buffer_info.device_name = device_name
+
+        # Populate enabled channels
+        ch1_info = IIOChannelInfo()
+        ch1_info.name = channel_name
+        ch1_info.is_output = True
+        buffer_info.enabled_channels = [ch1_info]
+
+        if enabled_channels == 2:
+            ch2_info = IIOChannelInfo()
+            ch2_info.name = channel_name2
+            ch2_info.is_output = True
+            buffer_info.enabled_channels.append(ch2_info)
 
         # Emit the buffer info with the correct type
         op_output.emit(buffer_info, "buffer",
@@ -198,14 +212,22 @@ class BasicBufferPrinterOp(Operator):
                 sample = struct.unpack('<h', buffer_data[i:i+2])[0]
                 samples.append(sample)
 
-        # Print the buffer info
-        print(f"Buffer info: samples_count = {buffer_info.samples_count}")
+        # Print the buffer info including
+        print(f"Buffer info: samples_count = {buffer_info.samples_count}, "
+              f"device = {buffer_info.device_name}, "
+              f"cyclic = {buffer_info.is_cyclic}, "
+              f"enabled_channels = {len(buffer_info.enabled_channels)}")
 
-        # Print first few samples (matching C++ behavior)
+        # Print channel information
+        for ch in buffer_info.enabled_channels:
+            print(
+                f"Channel: {ch.name} ({'output' if ch.is_output else 'input'})")
+
+        # Print first X samples (matching C++ behavior)
+        samples_to_print = 100
+        print(f"First {samples_to_print} samples:")
         print(" ".join(str(sample)
-              for sample in samples[:min(len(samples), 20)]))
-        if len(samples) > 20:
-            print("... (truncated)")
+              for sample in samples[:min(len(samples), samples_to_print)]))
 
 
 class MyApp(Application):
@@ -290,12 +312,8 @@ class MyApp(Application):
         # Create condition for IIO operations
         iio_rw_cond = CountCondition(self, 1)
 
-        # Channel configuration matching C++ implementation
-        # "voltage1" commented out like in C++
         enabled_channels_names_1 = ["voltage0"]
-        # enabled_channels_names_2 = ["voltage2"]
         enabled_channels_output = [True]  # True for output channels
-        # enabled_channels_input = [False]  # False for input channels
 
         # Create IIO buffer write operator 1
         iio_buf_write_op_1 = IIOBufferWrite(
@@ -340,8 +358,8 @@ class MyApp(Application):
         # self.attr_read_example()
         # self.attr_write_example()
         # self.buffer_write_example()
-        # self.buffer_read_example()
-        self.configurator_example()
+        self.buffer_read_example()
+        # self.configurator_example()
 
 
 if __name__ == "__main__":

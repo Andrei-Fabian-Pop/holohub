@@ -175,6 +175,18 @@ void IIOBufferRead::compute(InputContext&, OutputContext& op_output, ExecutionCo
   auto buffer_info = std::shared_ptr<iio_buffer_info_t>(new iio_buffer_info_t);
   buffer_info->buffer = nullptr;
   buffer_info->samples_count = 0;
+  buffer_info->is_cyclic = is_cyclic.get();
+  buffer_info->device_name = dev_p_.get();
+  
+  // Populate enabled channels information
+  std::vector<std::string>& enabled_channel_names = enabled_channel_names_p_.get();
+  std::vector<bool>& enabled_channel_types = enabled_channel_types_p_.get();
+  for (size_t i = 0; i < enabled_channel_names.size(); ++i) {
+    iio_channel_info_t chan_info;
+    chan_info.name = enabled_channel_names[i];
+    chan_info.is_output = enabled_channel_types[i];
+    buffer_info->enabled_channels.push_back(chan_info);
+  }
 
   if (!buffer_) {
     HOLOSCAN_LOG_INFO(

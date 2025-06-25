@@ -151,6 +151,13 @@ void IIOBufferWrite::compute(InputContext& op_input, OutputContext&, ExecutionCo
     return;
   }
 
+  // Log the received buffer information for debugging
+  HOLOSCAN_LOG_DEBUG("Received buffer from device: {}, samples: {}, cyclic: {}, channels: {}",
+                     buffer_info->device_name,
+                     buffer_info->samples_count,
+                     buffer_info->is_cyclic,
+                     buffer_info->enabled_channels.size());
+
   if (!buffer_ || buffer_samples_count_ != buffer_info->samples_count) {
     if (buffer_) {
       HOLOSCAN_LOG_INFO("Destroying buffer due to size mismatch.");
@@ -161,7 +168,7 @@ void IIOBufferWrite::compute(InputContext& op_input, OutputContext&, ExecutionCo
                       buffer_info->samples_count,
                       sample_size_);
     buffer_samples_count_ = static_cast<uint32_t>(buffer_info->samples_count);
-    buffer_ = iio_device_create_buffer(dev_, buffer_info->samples_count, is_cyclic.get());
+    buffer_ = iio_device_create_buffer(dev_, buffer_info->samples_count, buffer_info->is_cyclic);
     if (!buffer_) {
       HOLOSCAN_LOG_ERROR("Failed to create buffer, error code {}", errno);
       GxfGraphInterrupt(context.context());

@@ -44,6 +44,6 @@ pybind11_add_holohub_module(
   CPP_CMAKE_TARGET
   iio_controller
   CLASS_NAME
-  "IIOAttributeRead, IIOAttributeWrite, IIOBufferInfo, IIOBufferRead, IIOBufferWrite, IIOConfigurator"
+  "IIOAttributeRead, IIOAttributeWrite, IIOBufferInfo, IIOBufferRead, IIOBufferWrite, IIOConfigurator, IIOChannelInfo"
   SOURCES
   iio_controller_py.cpp)

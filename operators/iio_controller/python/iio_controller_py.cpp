@@ -197,9 +197,17 @@ PYBIND11_MODULE(_iio_controller, m) {
   m.attr("__version__") = "dev";
 #endif
 
+  py::class_<iio_channel_info_t>(m, "IIOChannelInfo")
+      .def(py::init<>())
+      .def_readwrite("name", &iio_channel_info_t::name)
+      .def_readwrite("is_output", &iio_channel_info_t::is_output);
+
   py::class_<iio_buffer_info_t>(m, "IIOBufferInfo")
       .def(py::init<>())
       .def_readwrite("samples_count", &iio_buffer_info_t::samples_count)
+      .def_readwrite("is_cyclic", &iio_buffer_info_t::is_cyclic)
+      .def_readwrite("device_name", &iio_buffer_info_t::device_name)
+      .def_readwrite("enabled_channels", &iio_buffer_info_t::enabled_channels)
       .def_property("buffer",
                     [](const iio_buffer_info_t& self) -> py::bytes {
                       if (self.buffer == nullptr) return py::bytes();

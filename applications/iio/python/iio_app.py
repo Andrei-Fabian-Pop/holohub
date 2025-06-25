@@ -10,6 +10,7 @@ from holohub.iio_controller import IIOAttributeRead, IIOAttributeWrite, IIOConfi
 
 G_NUM_REPETITIONS = 10
 G_URI = "ip:192.168.2.1"
+G_NUM_CHANNELS = 2  # Set to 1 or 2 to control number of channels
 
 
 class BasicPrintOp(Operator):
@@ -81,8 +82,9 @@ class BasicIIOBufferEmitterOp(Operator):
         return sine_wave
 
     def compute(self, op_input, op_output, context):
-        enabled_channels: int = 1  # NOTE: Setting this to 2 does not work perfectly
-        num_samples: int = 8192 * enabled_channels
+        enabled_channels: int = G_NUM_CHANNELS
+        total_samples: int = 8192  # Total samples PER CHANNEL
+        buffer_size: int = total_samples * enabled_channels  # Total buffer size
         frequency: float = 8
         amplitude: float = 408
         sample_rate: float = 400
@@ -103,36 +105,38 @@ class BasicIIOBufferEmitterOp(Operator):
             channel_name2, True) if enabled_channels == 2 else None
 
         data_vector = self.generate_sinewave(
-            num_samples // enabled_channels, frequency, amplitude, sample_rate
+            total_samples, frequency, amplitude, sample_rate
         )
         data_vector2 = self.generate_sinewave(
-            num_samples // enabled_channels, frequency, amplitude // 2, sample_rate
+            total_samples, frequency, amplitude // 2, sample_rate
         )
 
         # Create buffer info structure
         buffer_info = IIOBufferInfo()
 
         # Create buffer data - pluto has a sample size of 2 bytes (int16)
-        buffer_data = bytearray(num_samples * 2)
+        buffer_data = bytearray(buffer_size * 2)
         chn.enabled = True
+        if enabled_channels == 2 and chn2:
+            chn2.enabled = True
 
-        for i in range(0, num_samples, enabled_channels):
-            sample_idx = i // enabled_channels
+        # Interleave samples for multi-channel setup
+        for sample_idx in range(total_samples):
+            buffer_idx = sample_idx * enabled_channels
+
+            # Channel 0
             sample0 = data_vector[sample_idx]
+            struct.pack_into('<h', buffer_data, buffer_idx * 2, sample0)
 
-            # Pack the sample into the buffer
-            struct.pack_into('<h', buffer_data, i * 2, sample0)
-
-            # Apply channel conversion if needed (simplified - the actual
-            # conversion would require proper IIO channel conversion
-
+            # Channel 1 (if enabled)
             if enabled_channels == 2:
                 sample1 = data_vector2[sample_idx]
-                struct.pack_into('<h', buffer_data, (i + 1) * 2, sample1)
+                struct.pack_into('<h', buffer_data,
+                                 (buffer_idx + 1) * 2, sample1)
 
         # Set buffer info properties
-        # 1 sample contains samples for all channels
-        buffer_info.samples_count = num_samples // enabled_channels
+        # samples_count represents the number of samples per channel
+        buffer_info.samples_count = total_samples
         buffer_info.buffer = bytes(buffer_data)
         buffer_info.is_cyclic = True
         buffer_info.device_name = device_name
@@ -188,10 +192,10 @@ class BasicBufferPrinterOp(Operator):
             print("Error: Buffer is null")
             return
 
-        enabled_channels = 1
-        device_name = "cf-ad9361-dds-core-lpc"
-        channel_name = "voltage0"
-        channel_name2 = "voltage1"
+        enabled_channels = len(buffer_info.enabled_channels)
+        device_name = buffer_info.device_name
+        channel_name = buffer_info.enabled_channels[0].name if enabled_channels > 0 else ""
+        channel_name2 = buffer_info.enabled_channels[1].name if enabled_channels > 1 else ""
 
         ctx = iio.Context(_context=G_URI)
         dev = ctx.find_device(device_name)
@@ -223,11 +227,25 @@ class BasicBufferPrinterOp(Operator):
             print(
                 f"Channel: {ch.name} ({'output' if ch.is_output else 'input'})")
 
-        # Print first X samples (matching C++ behavior)
-        samples_to_print = 100
-        print(f"First {samples_to_print} samples:")
-        print(" ".join(str(sample)
-              for sample in samples[:min(len(samples), samples_to_print)]))
+        # Print first X samples per channel
+        samples_to_print = 100  # Per channel
+        print(f"First {samples_to_print} samples per channel:")
+
+        if enabled_channels == 1:
+            print("Channel 0:", " ".join(str(sample)
+                  for sample in samples[:min(samples_to_print, len(samples))]))
+        else:
+            # Extract and print interleaved samples for each channel
+            ch0_samples = []
+            ch1_samples = []
+            for i in range(0, min(samples_to_print * enabled_channels, len(samples)), enabled_channels):
+                if i < len(samples):
+                    ch0_samples.append(samples[i])
+                if i + 1 < len(samples):
+                    ch1_samples.append(samples[i + 1])
+
+            print("Channel 0:", " ".join(str(s) for s in ch0_samples))
+            print("Channel 1:", " ".join(str(s) for s in ch1_samples))
 
 
 class MyApp(Application):
@@ -280,8 +298,10 @@ class MyApp(Application):
         iio_rw_cond = CountCondition(self, 1)
 
         # Channel configuration matching C++ implementation
-        enabled_channels_names_1 = ["voltage0"]
-        enabled_channels_input = [False]  # False for input channels
+        enabled_channels_names_1 = [
+            "voltage0", "voltage1"] if G_NUM_CHANNELS == 2 else ["voltage0"]
+        enabled_channels_input = [
+            False, False] if G_NUM_CHANNELS == 2 else [False]
 
         # Create IIO buffer read operator
         iio_buf_read_op = IIOBufferRead(
@@ -312,8 +332,13 @@ class MyApp(Application):
         # Create condition for IIO operations
         iio_rw_cond = CountCondition(self, 1)
 
+        # Channel configuration based on G_NUM_CHANNELS
         enabled_channels_names_1 = ["voltage0"]
         enabled_channels_output = [True]  # True for output channels
+
+        if G_NUM_CHANNELS == 2:
+            enabled_channels_names_1.append("voltage1")
+            enabled_channels_output.append(True)
 
         # Create IIO buffer write operator 1
         iio_buf_write_op_1 = IIOBufferWrite(
@@ -357,8 +382,8 @@ class MyApp(Application):
         """Compose the application."""
         # self.attr_read_example()
         # self.attr_write_example()
-        # self.buffer_write_example()
-        self.buffer_read_example()
+        self.buffer_write_example()
+        # self.buffer_read_example()
         # self.configurator_example()
 
 

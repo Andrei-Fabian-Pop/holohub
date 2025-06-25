@@ -15,6 +15,7 @@
 
 static constexpr int G_NUM_READS = 10;
 static constexpr const char* G_URI = "ip:192.168.2.1";
+static constexpr int G_NUM_CHANNELS = 2;  // Set to 1 or 2 to control number of channels
 
 namespace holoscan::ops {
 
@@ -69,8 +70,9 @@ class BasicIIOBufferEmitterOP : public Operator {
   }
 
   void compute(InputContext&, OutputContext& op_output, ExecutionContext&) override {
-    uint enabled_channels = 1;  // NOTE: Setting this to 1 does not work perfectly
-    ulong num_samples = 8192 * enabled_channels;
+    uint enabled_channels = G_NUM_CHANNELS;
+    ulong total_samples = 8192;                            // Total samples PER CHANNEL
+    ulong buffer_size = total_samples * enabled_channels;  // Total buffer size
     float frequency = 8;
     float amplitude = 408;
     float sample_rate = 400;
@@ -86,12 +88,12 @@ class BasicIIOBufferEmitterOP : public Operator {
     iio_channel* chn2 = iio_device_find_channel(dev, channel_name2.c_str(), true);
 
     std::vector<int16_t> data_vector =
-        generateSineWave(num_samples / enabled_channels, frequency, amplitude, sample_rate);
+        generateSineWave(total_samples, frequency, amplitude, sample_rate);
     std::vector<int16_t> data_vector2 =
-        generateSineWave(num_samples / enabled_channels, frequency, amplitude / 2, sample_rate);
+        generateSineWave(total_samples, frequency, amplitude / 2, sample_rate);
 
     auto buffer_info = std::shared_ptr<iio_buffer_info_t>(new iio_buffer_info_t);
-    buffer_info->buffer = new int16_t[num_samples];  // pluto has a sample size of 2 bytes
+    buffer_info->buffer = new int16_t[buffer_size];  // pluto has a sample size of 2 bytes
     buffer_info->is_cyclic = true;
     buffer_info->device_name = device_name;
 
@@ -108,22 +110,27 @@ class BasicIIOBufferEmitterOP : public Operator {
       buffer_info->enabled_channels.push_back(ch2_info);
     }
 
-    for (size_t i = 0; i < num_samples; i += enabled_channels) {
-      static_cast<int16_t*>(buffer_info->buffer)[i] = data_vector[i / enabled_channels];
-      iio_channel_convert_inverse(chn,
-                                  static_cast<int16_t*>(buffer_info->buffer) + i,
-                                  static_cast<int16_t*>(buffer_info->buffer) + i);
+    // Interleave samples for multi-channel setup
+    for (size_t sample_idx = 0; sample_idx < total_samples; ++sample_idx) {
+      size_t buffer_idx = sample_idx * enabled_channels;
 
+      // Channel 0
+      static_cast<int16_t*>(buffer_info->buffer)[buffer_idx] = data_vector[sample_idx];
+      iio_channel_convert_inverse(chn,
+                                  static_cast<int16_t*>(buffer_info->buffer) + buffer_idx,
+                                  static_cast<int16_t*>(buffer_info->buffer) + buffer_idx);
+
+      // Channel 1 (if enabled)
       if (enabled_channels == 2) {
-        static_cast<int16_t*>(buffer_info->buffer)[i + 1] = data_vector2[i / enabled_channels];
+        static_cast<int16_t*>(buffer_info->buffer)[buffer_idx + 1] = data_vector2[sample_idx];
         iio_channel_convert_inverse(chn2,
-                                    static_cast<int16_t*>(buffer_info->buffer) + i + 1,
-                                    static_cast<int16_t*>(buffer_info->buffer) + i + 1);
+                                    static_cast<int16_t*>(buffer_info->buffer) + buffer_idx + 1,
+                                    static_cast<int16_t*>(buffer_info->buffer) + buffer_idx + 1);
       }
     }
 
-    // 1 sample contains samples for 2 channels
-    buffer_info->samples_count = num_samples / enabled_channels;
+    // samples_count represents the number of samples per channel
+    buffer_info->samples_count = total_samples;
 
     // Emit the buffer info
     op_output.emit(buffer_info, "buffer");
@@ -145,27 +152,7 @@ class BasicIIOBufferPrinterOP : public Operator {
       return;
     }
 
-    uint enabled_channels = 1;
-    std::string device_name = "cf-ad9361-dds-core-lpc";
-    std::string channel_name = "voltage0";
-    std::string channel_name2 = "voltage1";
-
-    iio_context* ctx = iio_create_context_from_uri(G_URI);
-    iio_device* dev = iio_context_find_device(ctx, device_name.c_str());
-    iio_channel* chn = iio_device_find_channel(dev, channel_name.c_str(), true);
-    iio_channel* chn2 = iio_device_find_channel(dev, channel_name2.c_str(), true);
-
-    for (size_t i = 0; i < buffer_info->samples_count; ++i) {
-      iio_channel_convert(chn,
-                          static_cast<int16_t*>(buffer_info->buffer) + i,
-                          static_cast<int16_t*>(buffer_info->buffer) + i);
-
-      if (enabled_channels == 2) {
-        iio_channel_convert(chn2,
-                            static_cast<int16_t*>(buffer_info->buffer) + i + 1,
-                            static_cast<int16_t*>(buffer_info->buffer) + i + 1);
-      }
-    }
+    uint enabled_channels = buffer_info->enabled_channels.size();
 
     // Print the buffer info including new fields
     HOLOSCAN_LOG_INFO(
@@ -181,12 +168,29 @@ class BasicIIOBufferPrinterOP : public Operator {
     }
 
     // Print first few samples
-    const size_t samples_to_print = 100;
-    HOLOSCAN_LOG_INFO("First {} samples:", samples_to_print);
-    for (size_t i = 0; i < std::min(samples_to_print, buffer_info->samples_count); ++i) {
-      std::cout << static_cast<int16_t*>(buffer_info->buffer)[i] << " ";
+    const size_t samples_to_print = 100;  // Per channel
+    HOLOSCAN_LOG_INFO("First {} samples per channel:", samples_to_print);
+
+    if (enabled_channels == 1) {
+      std::cout << "Channel 0: ";
+      for (size_t i = 0; i < std::min(samples_to_print, buffer_info->samples_count); ++i) {
+        std::cout << static_cast<int16_t*>(buffer_info->buffer)[i] << " ";
+      }
+      std::cout << std::endl;
+    } else {
+      // Print interleaved samples for each channel
+      std::cout << "Channel 0: ";
+      for (size_t i = 0; i < std::min(samples_to_print, buffer_info->samples_count); ++i) {
+        std::cout << static_cast<int16_t*>(buffer_info->buffer)[i * enabled_channels] << " ";
+      }
+      std::cout << std::endl;
+
+      std::cout << "Channel 1: ";
+      for (size_t i = 0; i < std::min(samples_to_print, buffer_info->samples_count); ++i) {
+        std::cout << static_cast<int16_t*>(buffer_info->buffer)[i * enabled_channels + 1] << " ";
+      }
+      std::cout << std::endl;
     }
-    std::cout << std::endl;
   }
 };
 
@@ -248,8 +252,17 @@ class App : public holoscan::Application {
 
     auto iio_rw_cond = make_condition<CountCondition>("iio_read_cond", 1);
 
-    std::vector<std::string> enabled_channels_names_1 = {"voltage0"};
-    std::vector<bool> enabled_channels_input = {false};  // False for input channels
+    // Channel configuration based on G_NUM_CHANNELS
+    std::vector<std::string> enabled_channels_names_1;
+    std::vector<bool> enabled_channels_output;
+
+    enabled_channels_names_1.push_back("voltage0");
+    enabled_channels_output.push_back(false);  // False for input channels
+
+    if (G_NUM_CHANNELS == 2) {
+      enabled_channels_names_1.push_back("voltage1");
+      enabled_channels_output.push_back(false);
+    }
 
     auto iio_buf_read_op =
         make_operator<ops::IIOBufferRead>("iio_buffer_read",
@@ -258,7 +271,7 @@ class App : public holoscan::Application {
                                           Arg("is_cyclic") = true,
                                           Arg("samples_count") = static_cast<size_t>(8192),
                                           Arg("enabled_channel_names") = enabled_channels_names_1,
-                                          Arg("enabled_channel_output") = enabled_channels_input,
+                                          Arg("enabled_channel_output") = enabled_channels_output,
                                           iio_rw_cond);
 
     auto basic_buffer_printer_op =
@@ -274,10 +287,17 @@ class App : public holoscan::Application {
 
     auto iio_rw_cond = make_condition<CountCondition>("iio_write_cond", 1);
 
-    // FIXME: If adding voltage1/true to the list, the example does not work
-    // due to a sample size mismatch
-    std::vector<std::string> enabled_channels_names_1 = {"voltage0"};
-    std::vector<bool> enabled_channels_output = {true};  // True for output channels
+    // Channel configuration based on G_NUM_CHANNELS
+    std::vector<std::string> enabled_channels_names_1;
+    std::vector<bool> enabled_channels_output;
+
+    enabled_channels_names_1.push_back("voltage0");
+    enabled_channels_output.push_back(true);  // True for output channels
+
+    if (G_NUM_CHANNELS == 2) {
+      enabled_channels_names_1.push_back("voltage1");
+      enabled_channels_output.push_back(true);
+    }
 
     auto iio_buf_write_op_1 =
         make_operator<ops::IIOBufferWrite>("iio_buffer_write_1",
@@ -318,8 +338,8 @@ class App : public holoscan::Application {
     // Uncomment the examples you want to run
     // attr_read_example();
     // attr_write_example();
-    buffer_write_example();
-    // buffer_read_example();
+    // buffer_write_example();
+    buffer_read_example();
     // configurator_example();
   }
 

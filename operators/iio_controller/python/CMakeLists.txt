@@ -12,12 +12,7 @@
 # License for the specific language governing permissions and limitations under
 # the License.
 
-# # Files to be included in the module list( APPEND iio_controller_files
-# __init__.py iio_params.py iio_attribute_read.py iio_attribute_write.py
-# iio_buffer_read.py iio_buffer_write.py iio_configurator.py)
-
 cmake_minimum_required(VERSION 3.20)
-# project(iio_controller LANGUAGES NONE)
 
 find_package(
   holoscan

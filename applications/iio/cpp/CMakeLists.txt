@@ -15,6 +15,9 @@
 cmake_minimum_required(VERSION 3.20)
 project(iio LANGUAGES CXX)
 
+set(CMAKE_CUDA_ARCHITECTURES "70;80;90")
+enable_language(CUDA)
+
 find_package(
   holoscan
   2.6
@@ -24,9 +27,13 @@ find_package(
   "/opt/nvidia/holoscan"
   "/workspace/holoscan-sdk/install")
 
-add_executable(iio main.cpp)
+find_package(matx CONFIG REQUIRED)
 
-target_link_libraries(iio PRIVATE holoscan::core iio_controller)
+add_executable(iio main.cpp classify_modulation_example.hpp
+                   pluto_fft_example.hpp support_operators.hpp)
+
+target_link_libraries(iio PRIVATE holoscan::core iio_controller
+                                  holoscan::ops::fft matx::matx)
 
 # Copy config file
 add_custom_target(

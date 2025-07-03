@@ -26,7 +26,7 @@ enum class attr_type_t {
 
 struct iio_channel_info_t {
   std::string name;
-  bool is_output;  // true for output channel, false for input channel
+  bool is_output;
 };
 
 struct iio_buffer_info_t {

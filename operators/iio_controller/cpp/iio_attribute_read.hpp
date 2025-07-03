@@ -32,7 +32,7 @@ class IIOAttributeRead : public holoscan::Operator {
   ~IIOAttributeRead() = default;
 
   void setup(OperatorSpec& spec) override;
-  __attribute__((visibility("default"))) void initialize() override;
+  void initialize() override;
   void compute(InputContext& op_input, OutputContext& op_output, ExecutionContext& ec) override;
 
  private:
@@ -50,7 +50,7 @@ class IIOAttributeRead : public holoscan::Operator {
 
   char buffer[1024];
   ssize_t ret = -1;
-  
+
   // Error flags for initialization failures
   bool ctx_creation_failed_ = false;
   bool dev_not_found_ = false;

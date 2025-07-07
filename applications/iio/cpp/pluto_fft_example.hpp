@@ -22,29 +22,26 @@ class PlutoFFTExample : public holoscan::Application {
   PlutoFFTExample() { name_ = "PlutoFFTExample"; }
 
   void compose() override {
-    std::vector<std::string> enabled_channels = {"voltage0"};
-    std::vector<bool> enabled_channels_output = {true};
-
-    auto iio_buffer_emitter_op =
-        make_operator<ops::BasicIIOBufferEmitterOP>("basic_buffer_emitter_op");
-
-    auto iio_buffer_write_op =
-        make_operator<ops::IIOBufferWrite>("iio_buffer_write",
-                                           Arg("ctx") = std::string(G_URI),
-                                           Arg("dev") = std::string("cf-ad9361-dds-core-lpc"),
-                                           Arg("is_cyclic") = true,
-                                           Arg("enabled_channel_names") = enabled_channels,
-                                           Arg("enabled_channel_output") = enabled_channels_output);
-
+    // IIOBufferRead operator - reads data from Pluto SDR
     auto iio_buf_read_op = make_operator<ops::IIOBufferRead>(
         "iio_buffer_read",
         Arg("ctx") = std::string(G_URI),
         Arg("dev") = std::string("cf-ad9361-lpc"),
         Arg("is_cyclic") = true,
-        Arg("samples_count") = static_cast<size_t>(8192),
+        Arg("samples_count") = static_cast<size_t>(8192),  // Total samples for I/Q pairs: 8192 I/Q pairs = 16384 int16 values
         Arg("enabled_channel_names") = std::vector<std::string>{"voltage0"},
         Arg("enabled_channel_output") = std::vector<bool>{false});
 
+    // IIOBuffer2CudaTensorOp - converts IIO buffer to CUDA tensor
+    auto buffer_to_tensor_op = make_operator<ops::IIOBuffer2CudaTensorOp>(
+        "buffer_to_tensor",
+        Arg("num_channels") = 1U,
+        Arg("samples_per_channel") = 8192UL,  // Number of complex samples after I/Q conversion
+        Arg("data_format") = std::string("interleaved_iq"),
+        Arg("burst_size") = 1024,
+        Arg("num_bursts") = 8);
+
+    // FFT operator - performs FFT on the CUDA tensor
     auto fft_op = make_operator<ops::FFT>("fft",
                                       Arg("burst_size") = 1024,
                                       Arg("num_bursts") = 8,
@@ -62,13 +59,15 @@ class PlutoFFTExample : public holoscan::Application {
                                       Arg("f2_index") = static_cast<int32_t>(1023),
                                       Arg("window_time_delta") = static_cast<uint32_t>(1000));
 
-    auto basic_buffer_printer_op =
-        make_operator<ops::BasicIIOBufferPrinterOP>("basic_buffer_printer_op");
+    // FFTTensorPrinterOp - pretty prints FFT output
+    auto fft_printer_op = make_operator<ops::FFTTensorPrinterOp>(
+        "fft_printer",
+        Arg("samples_to_print") = 50UL);
 
-    // add_flow(iio_buffer_emitter_op, iio_buffer_write_op, {{"buffer", "buffer"}});
-    // add_flow(iio_buffer_write_op, iio_buf_read_op);
-    add_flow(iio_buf_read_op, fft_op);
-    add_flow(fft_op, basic_buffer_printer_op);
+    // Connect the operators in the specified flow
+    add_flow(iio_buf_read_op, buffer_to_tensor_op, {{"buffer", "buffer"}});
+    add_flow(buffer_to_tensor_op, fft_op, {{"tensor", "in"}});
+    add_flow(fft_op, fft_printer_op, {{"out", "buffer"}});
   }
 
  private:

@@ -10,6 +10,14 @@
 #include "iio_params.hpp"
 
 #include <iio.h>
+#include <matx.h>
+#include <cuda_runtime.h>
+#include <cmath>
+#include <iomanip>
+#include <vector>
+
+using namespace matx;
+using complex = cuda::std::complex<float>;
 
 static constexpr int G_NUM_READS = 10;
 static constexpr const char* G_URI = "ip:192.168.2.1";
@@ -198,6 +206,207 @@ class BasicWaitOp : public Operator {
 
   void setup(OperatorSpec&) override {}
   void compute(InputContext&, OutputContext&, ExecutionContext&) override { sleep(20); }
+};
+
+class IIOBuffer2CudaTensorOp : public Operator {
+ public:
+  HOLOSCAN_OPERATOR_FORWARD_ARGS(IIOBuffer2CudaTensorOp);
+  IIOBuffer2CudaTensorOp() = default;
+  ~IIOBuffer2CudaTensorOp() = default;
+
+  void setup(OperatorSpec& spec) override {
+    spec.input<iio_buffer_info_t>("buffer");
+    spec.output<std::tuple<tensor_t<complex, 2>, cudaStream_t>>("tensor");
+    spec.param(num_channels_, "num_channels", "Number of channels", "Number of channels in the data", 1U);
+    spec.param(samples_per_channel_, "samples_per_channel", "Samples per channel", "Number of samples per channel", 8192UL);
+    spec.param(data_format_, "data_format", "Data format", "Format of the input data (interleaved_iq)", std::string("interleaved_iq"));
+    spec.param(burst_size_, "burst_size", "Burst size", "Number of samples per burst for FFT", 1024);
+    spec.param(num_bursts_, "num_bursts", "Number of bursts", "Number of bursts for FFT", 8);
+  }
+
+  void initialize() override {
+    Operator::initialize();
+    
+    // Create CUDA stream
+    cudaStreamCreate(&stream_);
+    
+    // Pre-allocate output tensor with shape matching FFT expectations
+    // For FFT operator: (num_bursts, burst_size)
+    make_tensor(output_tensor_, {static_cast<index_t>(num_bursts_.get()), 
+                                 static_cast<index_t>(burst_size_.get())});
+  }
+
+  void compute(InputContext& op_input, OutputContext& op_output, ExecutionContext&) override {
+    auto buffer_info = op_input.receive<std::shared_ptr<iio_buffer_info_t>>("buffer").value();
+    
+    if (!buffer_info || !buffer_info->buffer) {
+      HOLOSCAN_LOG_ERROR("IIOBuffer2CudaTensorOp: Invalid buffer received");
+      return;
+    }
+
+    // Get buffer properties
+    const int16_t* samples = static_cast<const int16_t*>(buffer_info->buffer);
+    const size_t num_channels = buffer_info->enabled_channels.size();
+    const size_t samples_per_channel = buffer_info->samples_count;
+    
+    // Validate dimensions
+    if (num_channels != num_channels_.get() || samples_per_channel != samples_per_channel_.get()) {
+      HOLOSCAN_LOG_WARN("Buffer dimensions mismatch: expected {}x{}, got {}x{}", 
+                        num_channels_.get(), samples_per_channel_.get(),
+                        num_channels, samples_per_channel);
+    }
+
+    // Convert data based on format
+    if (data_format_.get() == "interleaved_iq") {
+      // For single channel with interleaved I/Q data
+      if (num_channels == 1) {
+        // samples_per_channel is the number of I/Q pairs (complex samples)
+        // But the raw buffer has 2x that many int16 values (I and Q separate)
+        convertInterleavedIQToComplex(samples, samples_per_channel * 2);
+      } else {
+        // For multiple channels with interleaved channel data
+        convertMultiChannelToComplex(samples, num_channels, samples_per_channel);
+      }
+    }
+
+    // Emit the tensor with stream
+    op_output.emit(std::make_tuple(output_tensor_, stream_), "tensor");
+  }
+
+ private:
+  void convertInterleavedIQToComplex(const int16_t* samples, size_t num_samples) {
+    // Scale factor to convert int16 to float [-1.0, 1.0]
+    constexpr float scalar = 1.0f / 32767.0f;
+    
+    // Create temporary host buffer
+    size_t total_complex_samples = num_samples / 2;  // I/Q pairs to complex
+    std::vector<complex> host_data(total_complex_samples);
+    
+    // Convert interleaved I/Q samples to complex
+    for (size_t i = 0; i < total_complex_samples; ++i) {
+      float real = samples[i * 2] * scalar;
+      float imag = samples[i * 2 + 1] * scalar;
+      host_data[i] = complex(real, imag);
+    }
+    
+    // Copy all data to GPU at once
+    cudaMemcpyAsync(output_tensor_.Data(), host_data.data(), 
+                    total_complex_samples * sizeof(complex), 
+                    cudaMemcpyHostToDevice, stream_);
+  }
+  
+  void convertMultiChannelToComplex(const int16_t* samples, size_t num_channels, size_t samples_per_channel) {
+    // Scale factor to convert int16 to float [-1.0, 1.0]
+    constexpr float scalar = 1.0f / 32767.0f;
+    
+    // Create temporary host buffer
+    std::vector<complex> host_data(num_channels * samples_per_channel);
+    
+    // Convert multi-channel interleaved data
+    for (size_t ch = 0; ch < num_channels; ++ch) {
+      for (size_t s = 0; s < samples_per_channel; ++s) {
+        // Assuming real-only data for multi-channel (not I/Q pairs)
+        float real = samples[s * num_channels + ch] * scalar;
+        host_data[ch * samples_per_channel + s] = complex(real, 0.0f);
+      }
+    }
+    
+    // Copy to GPU
+    cudaMemcpyAsync(output_tensor_.Data(), host_data.data(),
+                    num_channels * samples_per_channel * sizeof(complex),
+                    cudaMemcpyHostToDevice, stream_);
+  }
+
+  Parameter<unsigned int> num_channels_;
+  Parameter<size_t> samples_per_channel_;
+  Parameter<std::string> data_format_;
+  Parameter<int> burst_size_;
+  Parameter<int> num_bursts_;
+  
+  cudaStream_t stream_;
+  tensor_t<complex, 2> output_tensor_;
+};
+
+class FFTTensorPrinterOp : public Operator {
+ public:
+  HOLOSCAN_OPERATOR_FORWARD_ARGS(FFTTensorPrinterOp);
+  FFTTensorPrinterOp() = default;
+  ~FFTTensorPrinterOp() = default;
+
+  void setup(OperatorSpec& spec) override {
+    spec.input<std::tuple<tensor_t<complex, 2>, cudaStream_t>>("buffer");
+    spec.param(samples_to_print_, "samples_to_print", "Samples to print", "Number of FFT samples to print", 20UL);
+  }
+
+  void compute(InputContext& op_input, OutputContext&, ExecutionContext&) override {
+    auto tensor_data = op_input.receive<std::tuple<tensor_t<complex, 2>, cudaStream_t>>("buffer").value();
+    auto& tensor = std::get<0>(tensor_data);
+    auto stream = std::get<1>(tensor_data);
+    
+    // Synchronize stream to ensure data is ready
+    cudaStreamSynchronize(stream);
+    
+    // Get tensor dimensions
+    auto shape = tensor.Shape();
+    size_t num_bursts = shape[0];  // First dimension is bursts, not channels
+    size_t burst_size = shape[1];  // FFT size per burst
+    
+    HOLOSCAN_LOG_INFO("FFT Output - Shape: {}x{} (bursts x FFT bins)", num_bursts, burst_size);
+    
+    // Copy data to host for printing
+    size_t samples_to_print = std::min(samples_to_print_.get(), burst_size);
+    std::vector<complex> host_data(num_bursts * samples_to_print);
+    
+    cudaMemcpy(host_data.data(), tensor.Data(), 
+               num_bursts * samples_to_print * sizeof(complex),
+               cudaMemcpyDeviceToHost);
+    
+    // Print FFT results for each burst
+    for (size_t burst = 0; burst < num_bursts; ++burst) {
+      HOLOSCAN_LOG_INFO("Burst {}: First {} FFT bins (magnitude):", burst, samples_to_print);
+      std::cout << "  ";
+      for (size_t s = 0; s < samples_to_print; ++s) {
+        complex val = host_data[burst * samples_to_print + s];
+        float magnitude = cuda::std::abs(val);
+        std::cout << std::fixed << std::setprecision(3) << magnitude << " ";
+      }
+      std::cout << std::endl;
+      
+      // Also print phase information for first few samples
+      HOLOSCAN_LOG_INFO("Burst {}: Phase (radians) for first 10 bins:", burst);
+      std::cout << "  ";
+      for (size_t s = 0; s < std::min(10UL, samples_to_print); ++s) {
+        complex val = host_data[burst * samples_to_print + s];
+        float phase = cuda::std::arg(val);
+        std::cout << std::fixed << std::setprecision(3) << phase << " ";
+      }
+      std::cout << std::endl;
+    }
+    
+    // Print DC component and max magnitude
+    complex dc_component = host_data[0];
+    HOLOSCAN_LOG_INFO("DC Component: {} + {}i (magnitude: {})", 
+                      dc_component.real(), dc_component.imag(), cuda::std::abs(dc_component));
+    
+    // Find max magnitude across all bursts
+    float max_magnitude = 0.0f;
+    size_t max_burst = 0;
+    size_t max_bin = 0;
+    for (size_t burst = 0; burst < num_bursts; ++burst) {
+      for (size_t bin = 0; bin < samples_to_print; ++bin) {
+        float mag = cuda::std::abs(host_data[burst * samples_to_print + bin]);
+        if (mag > max_magnitude) {
+          max_magnitude = mag;
+          max_burst = burst;
+          max_bin = bin;
+        }
+      }
+    }
+    HOLOSCAN_LOG_INFO("Max magnitude: {} at burst {} bin {}", max_magnitude, max_burst, max_bin);
+  }
+
+ private:
+  Parameter<size_t> samples_to_print_;
 };
 
 }  // namespace holoscan::ops

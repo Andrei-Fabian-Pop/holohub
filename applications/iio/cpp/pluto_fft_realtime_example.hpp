@@ -15,11 +15,9 @@
 
 using namespace holoscan;
 
-// TODO: Add a separate namespace for the new files (where needed)
-
-class PlutoFFTExample : public holoscan::Application {
+class PlutoFFTRealtimeExample : public holoscan::Application {
  public:
-  PlutoFFTExample() { name_ = "PlutoFFTExample"; }
+  PlutoFFTRealtimeExample() { name_ = "PlutoFFTRealtimeExample"; }
 
   void compose() override {
     // IIOBufferRead operator - reads data from Pluto SDR
@@ -48,47 +46,47 @@ class PlutoFFTExample : public holoscan::Application {
         Arg("adc_bits") = 12);  // Pluto SDR uses 12-bit ADC
 
     // FFT operator - performs FFT on the CUDA tensor with Hann window
-    auto fft_op = make_operator<ops::FFT>("fft",
-                                          Arg("burst_size") = 16384,
-                                          Arg("num_bursts") = 1,
-                                          Arg("num_channels") = static_cast<uint16_t>(1),
-                                          Arg("spectrum_type") = static_cast<uint8_t>(0),
-                                          Arg("averaging_type") = static_cast<uint8_t>(0),
-                                          Arg("window_time") = static_cast<uint8_t>(0),
-                                          Arg("window_type") = static_cast<uint8_t>(2),  // Hann window
-                                          Arg("transform_points") = static_cast<uint32_t>(16384),
-                                          Arg("window_points") = static_cast<uint32_t>(16384),
-                                          Arg("resolution") = static_cast<uint64_t>(1875),  // 30.72MHz/16384
-                                          Arg("span") = static_cast<uint64_t>(30720000),
-                                          Arg("weighting_factor") = 1.0f,
-                                          Arg("f1_index") = static_cast<int32_t>(0),
-                                          Arg("f2_index") = static_cast<int32_t>(16383),
-                                          Arg("window_time_delta") = static_cast<uint32_t>(1000));
+    auto fft_op =
+        make_operator<ops::FFT>("fft",
+                                Arg("burst_size") = 16384,
+                                Arg("num_bursts") = 1,
+                                Arg("num_channels") = static_cast<uint16_t>(1),
+                                Arg("spectrum_type") = static_cast<uint8_t>(0),
+                                Arg("averaging_type") = static_cast<uint8_t>(0),
+                                Arg("window_time") = static_cast<uint8_t>(0),
+                                Arg("window_type") = static_cast<uint8_t>(2),  // Hann window
+                                Arg("transform_points") = static_cast<uint32_t>(16384),
+                                Arg("window_points") = static_cast<uint32_t>(16384),
+                                Arg("resolution") = static_cast<uint64_t>(1875),  // 30.72MHz/16384
+                                Arg("span") = static_cast<uint64_t>(30720000),
+                                Arg("weighting_factor") = 1.0f,
+                                Arg("f1_index") = static_cast<int32_t>(0),
+                                Arg("f2_index") = static_cast<int32_t>(16383),
+                                Arg("window_time_delta") = static_cast<uint32_t>(1000));
 
-    // FFTGnuplotOp - generates gnuplot visualization and exits
-    auto fft_gnuplot_op = make_operator<ops::FFTGnuplotOp>(
-        "fft_gnuplot",
-        Arg("output_file") = std::string("pluto_fft_spectrum"),
-        Arg("selected_burst") = 0,
+    // FFTGnuplotRealtimeOp - real-time plotting with gnuplot
+    auto fft_gnuplot_realtime_op = make_operator<ops::FFTGnuplotRealtimeOp>(
+        "fft_gnuplot_realtime",
         Arg("max_frequency") = 30720000.0f,  // 30.72 MHz sample rate
         Arg("log_scale") = true,
         Arg("power_offset") = 0.0f,  // Can be adjusted for calibration
-        Arg("adc_bits") = 12);
+        Arg("adc_bits") = 12,
+        Arg("update_interval") = 100,                          // Update every 100ms
+        Arg("y_range") = std::vector<float>{-160.0f, 10.0f});  // dB range
 
     // Connect the operators in the specified flow
     add_flow(iio_buf_read_op, iio_convert_op, {{"buffer", "buffer_in"}});
     add_flow(iio_convert_op, buffer_to_tensor_op, {{"buffer_out", "buffer"}});
-    // add_flow(iio_buf_read_op, buffer_to_tensor_op, {{"buffer", "buffer"}});
     add_flow(buffer_to_tensor_op, fft_op, {{"tensor", "in"}});
-    add_flow(fft_op, fft_gnuplot_op, {{"out", "buffer"}});
+    add_flow(fft_op, fft_gnuplot_realtime_op, {{"out", "buffer"}});
   }
 
  private:
   std::string name_;
 };
 
-static int pluto_fft_main(int argc, char** argv) {
-  auto app = holoscan::make_application<PlutoFFTExample>();
+static int pluto_fft_realtime_main(int argc, char** argv) {
+  auto app = holoscan::make_application<PlutoFFTRealtimeExample>();
   app->run();
 
   return 0;

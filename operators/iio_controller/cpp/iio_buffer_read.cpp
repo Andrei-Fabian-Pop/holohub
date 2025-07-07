@@ -129,7 +129,7 @@ void IIOBufferRead::initialize() {
 }
 
 void IIOBufferRead::compute(InputContext&, OutputContext& op_output, ExecutionContext& context) {
-  HOLOSCAN_LOG_INFO("IIOBufferRead compute");
+  HOLOSCAN_LOG_DEBUG("IIOBufferRead compute");
 
   // Check if initialization failed and interrupt graph execution
   if (ctx_empty_) {
@@ -177,7 +177,7 @@ void IIOBufferRead::compute(InputContext&, OutputContext& op_output, ExecutionCo
   buffer_info->samples_count = 0;
   buffer_info->is_cyclic = is_cyclic.get();
   buffer_info->device_name = dev_p_.get();
-  
+
   // Populate enabled channels information
   std::vector<std::string>& enabled_channel_names = enabled_channel_names_p_.get();
   std::vector<bool>& enabled_channel_types = enabled_channel_types_p_.get();

@@ -27,6 +27,7 @@
 #include "iio_configurator.hpp"
 #include "iio_params.hpp"
 #include "pluto_fft_example.hpp"
+#include "pluto_fft_realtime_example.hpp"
 #include "support_operators.hpp"
 
 #include <dlpack/dlpack.h>
@@ -184,7 +185,20 @@ int main(int argc, char** argv) {
   // app->config(config_path);
   // app->run();
 
-  pluto_fft_main(argc, argv);
+  // Check if --realtime flag is passed
+  bool realtime = false;
+  for (int i = 1; i < argc; i++) {
+    if (std::string(argv[i]) == "--realtime") {
+      realtime = true;
+      break;
+    }
+  }
+
+  if (realtime) {
+    pluto_fft_realtime_main(argc, argv);
+  } else {
+    pluto_fft_main(argc, argv);
+  }
 
   return 0;
 }

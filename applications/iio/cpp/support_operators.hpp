@@ -12,6 +12,7 @@
 #include <cuda_runtime.h>
 #include <iio.h>
 #include <matx.h>
+#include <chrono>
 #include <cmath>
 #include <cstdlib>
 #include <fstream>
@@ -641,7 +642,7 @@ class FFTGnuplotOp : public Operator {
       // Apply logarithmic scale if enabled (like GNU Radio's nlog10)
       if (log_scale_.get()) {
         float db_value =
-            (normalized_power > 1e-10f) ? 10.0f * std::log10(normalized_power) : -100.0f;
+            (normalized_power > 1e-10f) ? 10.0f * std::log10(normalized_power) : -200.0f;
         magnitude_spectrum[i] = db_value + power_offset_.get();  // Add power offset
       } else {
         magnitude_spectrum[i] = std::sqrt(normalized_power);  // Convert back to magnitude
@@ -657,7 +658,8 @@ class FFTGnuplotOp : public Operator {
 
     for (size_t i = 0; i < burst_size; ++i) {
       // Map frequency axis to [-fs/2, +fs/2] range in MHz
-      float frequency_mhz = (static_cast<float>(i) - static_cast<float>(burst_size) / 2.0f) * freq_step_mhz;
+      float frequency_mhz =
+          (static_cast<float>(i) - static_cast<float>(burst_size) / 2.0f) * freq_step_mhz;
       data_stream << frequency_mhz << " " << magnitude_spectrum[i] << std::endl;
     }
     data_stream.close();
@@ -666,7 +668,8 @@ class FFTGnuplotOp : public Operator {
     auto peak_it = std::max_element(magnitude_spectrum.begin(), magnitude_spectrum.end());
     size_t peak_bin = std::distance(magnitude_spectrum.begin(), peak_it);
     // Calculate peak frequency in MHz using the same axis mapping
-    float peak_freq_mhz = (static_cast<float>(peak_bin) - static_cast<float>(burst_size) / 2.0f) * freq_step_mhz;
+    float peak_freq_mhz =
+        (static_cast<float>(peak_bin) - static_cast<float>(burst_size) / 2.0f) * freq_step_mhz;
 
     // Create gnuplot script
     std::string script_file = output_file_.get() + ".gp";
@@ -696,7 +699,8 @@ class FFTGnuplotOp : public Operator {
 
     if (result == 0) {
       HOLOSCAN_LOG_INFO("Gnuplot spectrum saved to: {}.png", output_file_.get());
-      HOLOSCAN_LOG_INFO("Peak frequency: {:.2f} MHz with magnitude: {:.2f} dB", peak_freq_mhz, *peak_it);
+      HOLOSCAN_LOG_INFO(
+          "Peak frequency: {:.2f} MHz with magnitude: {:.2f} dB", peak_freq_mhz, *peak_it);
     } else {
       HOLOSCAN_LOG_ERROR("Gnuplot execution failed with return code: {}", result);
     }
@@ -722,6 +726,155 @@ class FFTGnuplotOp : public Operator {
   Parameter<bool> log_scale_;
   Parameter<float> power_offset_;
   Parameter<int> adc_bits_;
+};
+
+class FFTGnuplotRealtimeOp : public Operator {
+ public:
+  HOLOSCAN_OPERATOR_FORWARD_ARGS(FFTGnuplotRealtimeOp);
+  FFTGnuplotRealtimeOp() = default;
+  ~FFTGnuplotRealtimeOp() {
+    // Clean up gnuplot process
+    if (gnuplot_pipe_) {
+      pclose(gnuplot_pipe_);
+    }
+  }
+
+  void setup(OperatorSpec& spec) override {
+    spec.input<std::tuple<tensor_t<complex, 2>, cudaStream_t>>("buffer");
+    spec.param(
+        max_frequency_, "max_frequency", "Max frequency", "Maximum frequency (Hz)", 1000000.0f);
+    spec.param(log_scale_, "log_scale", "Log scale", "Use logarithmic magnitude scale", true);
+    spec.param(power_offset_, "power_offset", "Power offset", "Power offset in dB", 0.0f);
+    spec.param(adc_bits_, "adc_bits", "ADC bits", "ADC resolution in bits", 12);
+    spec.param(update_interval_,
+               "update_interval",
+               "Update interval",
+               "Update interval in milliseconds",
+               100);
+    spec.param(y_range_,
+               "y_range",
+               "Y-axis range",
+               "Y-axis range [min, max]",
+               std::vector<float>{-200.0f, 0.0f});
+  }
+
+  void initialize() override {
+    Operator::initialize();
+
+    // Open persistent gnuplot pipe
+    gnuplot_pipe_ = popen("gnuplot", "w");
+    if (!gnuplot_pipe_) {
+      HOLOSCAN_LOG_ERROR("Failed to open gnuplot pipe");
+      return;
+    }
+
+    // Initialize gnuplot for real-time plotting
+    fprintf(gnuplot_pipe_, "set terminal x11 noraise\n");
+    fprintf(gnuplot_pipe_, "set title 'Pluto SDR Real-Time FFT Spectrum'\n");
+    fprintf(gnuplot_pipe_, "set xlabel 'Frequency (MHz)'\n");
+
+    if (log_scale_.get()) {
+      fprintf(gnuplot_pipe_, "set ylabel 'Magnitude (dB)'\n");
+      fprintf(gnuplot_pipe_, "set yrange [%f:%f]\n", y_range_.get()[0], y_range_.get()[1]);
+    } else {
+      fprintf(gnuplot_pipe_, "set ylabel 'Magnitude'\n");
+    }
+
+    fprintf(gnuplot_pipe_, "set grid\n");
+    fprintf(gnuplot_pipe_, "set style line 1 linecolor rgb '#00ff00' linewidth 2\n");
+    fflush(gnuplot_pipe_);
+
+    // Initialize timing
+    last_update_time_ = std::chrono::steady_clock::now();
+  }
+
+  void compute(InputContext& op_input, OutputContext&, ExecutionContext&) override {
+    // Check update interval
+    auto current_time = std::chrono::steady_clock::now();
+    auto elapsed =
+        std::chrono::duration_cast<std::chrono::milliseconds>(current_time - last_update_time_)
+            .count();
+
+    if (elapsed < update_interval_.get()) {
+      return;  // Skip this update
+    }
+    last_update_time_ = current_time;
+
+    auto tensor_data =
+        op_input.receive<std::tuple<tensor_t<complex, 2>, cudaStream_t>>("buffer").value();
+    auto& tensor = std::get<0>(tensor_data);
+    auto stream = std::get<1>(tensor_data);
+
+    // Synchronize stream to ensure data is ready
+    cudaStreamSynchronize(stream);
+
+    // Get tensor dimensions
+    auto shape = tensor.Shape();
+    size_t num_bursts = shape[0];
+    size_t burst_size = shape[1];
+
+    // Select first burst for real-time display
+    size_t selected_burst = 0;
+
+    // Copy data for selected burst to host
+    std::vector<complex> host_data(burst_size);
+    cudaMemcpy(host_data.data(),
+               tensor.Data() + selected_burst * burst_size,
+               burst_size * sizeof(complex),
+               cudaMemcpyDeviceToHost);
+
+    // Convert to magnitude spectrum using GNU Radio method
+    std::vector<float> magnitude_spectrum(burst_size);
+
+    // FFT normalization factor
+    float fft_normalization =
+        1.0f / (static_cast<float>(burst_size) * static_cast<float>(burst_size));
+
+    for (size_t i = 0; i < burst_size; ++i) {
+      // Calculate magnitude squared
+      float real = host_data[i].real();
+      float imag = host_data[i].imag();
+      float mag_squared = real * real + imag * imag;
+
+      // Apply FFT size normalization
+      float normalized_power = mag_squared * fft_normalization;
+
+      // Apply logarithmic scale if enabled
+      if (log_scale_.get()) {
+        float db_value =
+            (normalized_power > 1e-20f) ? 10.0f * std::log10(normalized_power) : -200.0f;
+        magnitude_spectrum[i] = db_value + power_offset_.get();
+      } else {
+        magnitude_spectrum[i] = std::sqrt(normalized_power);
+      }
+    }
+
+    // Send data to gnuplot
+    fprintf(gnuplot_pipe_, "plot '-' with lines linestyle 1 title 'FFT Magnitude'\n");
+
+    float freq_step = max_frequency_.get() / static_cast<float>(burst_size);
+    float freq_step_mhz = freq_step / 1e6f;
+
+    for (size_t i = 0; i < burst_size; ++i) {
+      // Map frequency axis to [-fs/2, +fs/2] range in MHz
+      float frequency_mhz =
+          (static_cast<float>(i) - static_cast<float>(burst_size) / 2.0f) * freq_step_mhz;
+      fprintf(gnuplot_pipe_, "%f %f\n", frequency_mhz, magnitude_spectrum[i]);
+    }
+    fprintf(gnuplot_pipe_, "e\n");
+    fflush(gnuplot_pipe_);
+  }
+
+ private:
+  Parameter<float> max_frequency_;
+  Parameter<bool> log_scale_;
+  Parameter<float> power_offset_;
+  Parameter<int> adc_bits_;
+  Parameter<int> update_interval_;
+  Parameter<std::vector<float>> y_range_;
+
+  FILE* gnuplot_pipe_ = nullptr;
+  std::chrono::steady_clock::time_point last_update_time_;
 };
 
 }  // namespace holoscan::ops

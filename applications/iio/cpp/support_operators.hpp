@@ -219,12 +219,16 @@ class IIOChannelConvertOp : public Operator {
   void setup(OperatorSpec& spec) override {
     spec.input<iio_buffer_info_t>("buffer_in");
     spec.output<iio_buffer_info_t>("buffer_out");
-    spec.param(convert_channels_, "convert_channels", "Convert channels", "Apply IIO channel conversion", true);
+    spec.param(convert_channels_,
+               "convert_channels",
+               "Convert channels",
+               "Apply IIO channel conversion",
+               true);
   }
 
   void initialize() override {
     Operator::initialize();
-    
+
     // Store IIO context and channels for conversion
     iio_context_ = nullptr;
     iio_device_ = nullptr;
@@ -232,7 +236,7 @@ class IIOChannelConvertOp : public Operator {
 
   void compute(InputContext& op_input, OutputContext& op_output, ExecutionContext&) override {
     auto buffer_info = op_input.receive<std::shared_ptr<iio_buffer_info_t>>("buffer_in").value();
-    
+
     if (!buffer_info || !buffer_info->buffer) {
       HOLOSCAN_LOG_ERROR("IIOChannelConvertOp: Invalid buffer received");
       return;
@@ -244,33 +248,31 @@ class IIOChannelConvertOp : public Operator {
     output_buffer_info->is_cyclic = buffer_info->is_cyclic;
     output_buffer_info->device_name = buffer_info->device_name;
     output_buffer_info->enabled_channels = buffer_info->enabled_channels;
-    
+
     // Get buffer properties
     const size_t num_channels = buffer_info->enabled_channels.size();
     const size_t samples_per_channel = buffer_info->samples_count;
     const size_t total_samples = samples_per_channel * num_channels;
-    
+
     // Allocate output buffer
     output_buffer_info->buffer = new int16_t[total_samples];
-    
+
     if (convert_channels_.get()) {
       // Apply IIO channel conversion
       convertChannelData(buffer_info, output_buffer_info, num_channels, samples_per_channel);
     } else {
       // Just copy data without conversion
-      std::memcpy(output_buffer_info->buffer, buffer_info->buffer, 
-                  total_samples * sizeof(int16_t));
+      std::memcpy(output_buffer_info->buffer, buffer_info->buffer, total_samples * sizeof(int16_t));
     }
-    
+
     // Emit the converted buffer
     op_output.emit(output_buffer_info, "buffer_out");
   }
 
  private:
   void convertChannelData(std::shared_ptr<iio_buffer_info_t> input_buffer,
-                         std::shared_ptr<iio_buffer_info_t> output_buffer,
-                         size_t num_channels, size_t samples_per_channel) {
-    
+                          std::shared_ptr<iio_buffer_info_t> output_buffer, size_t num_channels,
+                          size_t samples_per_channel) {
     // Get or create IIO context if needed
     if (!iio_context_) {
       iio_context_ = iio_create_context_from_uri(G_URI);
@@ -279,7 +281,7 @@ class IIOChannelConvertOp : public Operator {
         return;
       }
     }
-    
+
     // Get device
     if (!iio_device_) {
       iio_device_ = iio_context_find_device(iio_context_, input_buffer->device_name.c_str());
@@ -288,33 +290,34 @@ class IIOChannelConvertOp : public Operator {
         return;
       }
     }
-    
+
     // Get IIO channels for conversion
     std::vector<iio_channel*> iio_channels;
     for (const auto& ch_info : input_buffer->enabled_channels) {
-      iio_channel* ch = iio_device_find_channel(iio_device_, ch_info.name.c_str(), ch_info.is_output);
+      iio_channel* ch =
+          iio_device_find_channel(iio_device_, ch_info.name.c_str(), ch_info.is_output);
       if (ch) {
         iio_channels.push_back(ch);
       } else {
         HOLOSCAN_LOG_WARN("Could not find IIO channel: {}", ch_info.name);
       }
     }
-    
+
     const int16_t* input_data = static_cast<const int16_t*>(input_buffer->buffer);
     int16_t* output_data = static_cast<int16_t*>(output_buffer->buffer);
-    
+
     if (num_channels == 1) {
       // Single channel conversion
       if (!iio_channels.empty()) {
         iio_channel* ch = iio_channels[0];
-        
+
         for (size_t i = 0; i < samples_per_channel; ++i) {
           // Apply IIO channel conversion (handles scaling, offset, etc.)
           iio_channel_convert(ch, &output_data[i], &input_data[i]);
         }
-        
-        HOLOSCAN_LOG_DEBUG("Applied IIO channel conversion for single channel: {}", 
-                          input_buffer->enabled_channels[0].name);
+
+        HOLOSCAN_LOG_DEBUG("Applied IIO channel conversion for single channel: {}",
+                           input_buffer->enabled_channels[0].name);
       } else {
         // Fallback: copy without conversion
         std::memcpy(output_data, input_data, samples_per_channel * sizeof(int16_t));
@@ -324,18 +327,18 @@ class IIOChannelConvertOp : public Operator {
       for (size_t sample = 0; sample < samples_per_channel; ++sample) {
         for (size_t ch = 0; ch < num_channels && ch < iio_channels.size(); ++ch) {
           size_t idx = sample * num_channels + ch;
-          
+
           // Apply IIO channel conversion for each channel
           iio_channel_convert(iio_channels[ch], &output_data[idx], &input_data[idx]);
         }
       }
-      
+
       HOLOSCAN_LOG_DEBUG("Applied IIO channel conversion for {} channels", num_channels);
     }
   }
 
   Parameter<bool> convert_channels_;
-  
+
   // IIO context and device for channel conversion
   iio_context* iio_context_;
   iio_device* iio_device_;
@@ -365,6 +368,7 @@ class IIOBuffer2CudaTensorOp : public Operator {
     spec.param(
         burst_size_, "burst_size", "Burst size", "Number of samples per burst for FFT", 1024);
     spec.param(num_bursts_, "num_bursts", "Number of bursts", "Number of bursts for FFT", 8);
+    spec.param(adc_bits_, "adc_bits", "ADC bits", "ADC resolution in bits", 11);
   }
 
   void initialize() override {
@@ -420,17 +424,19 @@ class IIOBuffer2CudaTensorOp : public Operator {
 
  private:
   void convertInterleavedIQToComplex(const int16_t* samples, size_t num_samples) {
-    // Scale factor to convert int16 to float [-1.0, 1.0]
-    constexpr float scalar = 1.0f / 32767.0f;
+    // Use proper ADC scaling based on bit depth (like GNU Radio)
+    // Scale by the actual ADC resolution, not the int16 container size
+    float adc_scale = 1.0f / (1 << adc_bits_.get());
 
     // Create temporary host buffer
     size_t total_complex_samples = num_samples / 2;  // I/Q pairs to complex
     std::vector<complex> host_data(total_complex_samples);
 
-    // Convert interleaved I/Q samples to complex
+    // Convert interleaved I/Q samples to complex with proper ADC scaling
     for (size_t i = 0; i < total_complex_samples; ++i) {
-      float real = samples[i * 2] * scalar;
-      float imag = samples[i * 2 + 1] * scalar;
+      // Apply ADC scaling instead of full-scale int16 scaling
+      float real = static_cast<float>(samples[i * 2]) * adc_scale;
+      float imag = static_cast<float>(samples[i * 2 + 1]) * adc_scale;
       host_data[i] = complex(real, imag);
     }
 
@@ -472,6 +478,7 @@ class IIOBuffer2CudaTensorOp : public Operator {
   Parameter<std::string> data_format_;
   Parameter<int> burst_size_;
   Parameter<int> num_bursts_;
+  Parameter<int> adc_bits_;
 
   cudaStream_t stream_;
   tensor_t<complex, 2> output_tensor_;
@@ -584,6 +591,8 @@ class FFTGnuplotOp : public Operator {
     spec.param(
         max_frequency_, "max_frequency", "Max frequency", "Maximum frequency (Hz)", 1000000.0f);
     spec.param(log_scale_, "log_scale", "Log scale", "Use logarithmic magnitude scale", true);
+    spec.param(power_offset_, "power_offset", "Power offset", "Power offset in dB", 0.0f);
+    spec.param(adc_bits_, "adc_bits", "ADC bits", "ADC resolution in bits", 12);
   }
 
   void compute(InputContext& op_input, OutputContext&, ExecutionContext&) override {
@@ -613,35 +622,51 @@ class FFTGnuplotOp : public Operator {
                burst_size * sizeof(complex),
                cudaMemcpyDeviceToHost);
 
-    // Convert to magnitude spectrum
+    // Convert to magnitude spectrum using GNU Radio method
     std::vector<float> magnitude_spectrum(burst_size);
+
+    // FFT normalization factor (like GNU Radio's mult_const1)
+    float fft_normalization =
+        1.0f / (static_cast<float>(burst_size) * static_cast<float>(burst_size));
+
     for (size_t i = 0; i < burst_size; ++i) {
-      float magnitude = cuda::std::abs(host_data[i]);
+      // Calculate magnitude squared (like GNU Radio's complex_to_mag_squared)
+      float real = host_data[i].real();
+      float imag = host_data[i].imag();
+      float mag_squared = real * real + imag * imag;
 
-      // Apply logarithmic scale if enabled
+      // Apply FFT size normalization
+      float normalized_power = mag_squared * fft_normalization;
+
+      // Apply logarithmic scale if enabled (like GNU Radio's nlog10)
       if (log_scale_.get()) {
-        magnitude = (magnitude > 1e-10f) ? 20.0f * std::log10(magnitude) : -200.0f;
+        float db_value =
+            (normalized_power > 1e-10f) ? 10.0f * std::log10(normalized_power) : -100.0f;
+        magnitude_spectrum[i] = db_value + power_offset_.get();  // Add power offset
+      } else {
+        magnitude_spectrum[i] = std::sqrt(normalized_power);  // Convert back to magnitude
       }
-
-      magnitude_spectrum[i] = magnitude;
     }
 
-    // Write data file for gnuplot
+    // Write data file for gnuplot with frequency axis from -fs/2 to +fs/2
     std::string data_file = output_file_.get() + ".dat";
     std::ofstream data_stream(data_file);
 
     float freq_step = max_frequency_.get() / static_cast<float>(burst_size);
+    float freq_step_mhz = freq_step / 1e6f;  // Convert to MHz
 
     for (size_t i = 0; i < burst_size; ++i) {
-      float frequency = static_cast<float>(i) * freq_step;
-      data_stream << frequency << " " << magnitude_spectrum[i] << std::endl;
+      // Map frequency axis to [-fs/2, +fs/2] range in MHz
+      float frequency_mhz = (static_cast<float>(i) - static_cast<float>(burst_size) / 2.0f) * freq_step_mhz;
+      data_stream << frequency_mhz << " " << magnitude_spectrum[i] << std::endl;
     }
     data_stream.close();
 
     // Find peak frequency for title
     auto peak_it = std::max_element(magnitude_spectrum.begin(), magnitude_spectrum.end());
     size_t peak_bin = std::distance(magnitude_spectrum.begin(), peak_it);
-    float peak_freq = static_cast<float>(peak_bin) * freq_step;
+    // Calculate peak frequency in MHz using the same axis mapping
+    float peak_freq_mhz = (static_cast<float>(peak_bin) - static_cast<float>(burst_size) / 2.0f) * freq_step_mhz;
 
     // Create gnuplot script
     std::string script_file = output_file_.get() + ".gp";
@@ -650,9 +675,9 @@ class FFTGnuplotOp : public Operator {
     script_stream << "set terminal png size 1200,800\n";
     script_stream << "set output '" << output_file_.get() << ".png'\n";
     script_stream << "set title 'Pluto SDR FFT Spectrum - Peak at " << std::fixed
-                  << std::setprecision(1) << peak_freq << " Hz (" << std::setprecision(2)
+                  << std::setprecision(2) << peak_freq_mhz << " MHz (" << std::setprecision(2)
                   << *peak_it << " dB)'\n";
-    script_stream << "set xlabel 'Frequency (Hz)'\n";
+    script_stream << "set xlabel 'Frequency (MHz)'\n";
 
     if (log_scale_.get()) {
       script_stream << "set ylabel 'Magnitude (dB)'\n";
@@ -671,7 +696,7 @@ class FFTGnuplotOp : public Operator {
 
     if (result == 0) {
       HOLOSCAN_LOG_INFO("Gnuplot spectrum saved to: {}.png", output_file_.get());
-      HOLOSCAN_LOG_INFO("Peak frequency: {:.1f} Hz with magnitude: {:.2f} dB", peak_freq, *peak_it);
+      HOLOSCAN_LOG_INFO("Peak frequency: {:.2f} MHz with magnitude: {:.2f} dB", peak_freq_mhz, *peak_it);
     } else {
       HOLOSCAN_LOG_ERROR("Gnuplot execution failed with return code: {}", result);
     }
@@ -695,6 +720,8 @@ class FFTGnuplotOp : public Operator {
   Parameter<int> selected_burst_;
   Parameter<float> max_frequency_;
   Parameter<bool> log_scale_;
+  Parameter<float> power_offset_;
+  Parameter<int> adc_bits_;
 };
 
 }  // namespace holoscan::ops

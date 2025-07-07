@@ -44,7 +44,8 @@ class PlutoFFTExample : public holoscan::Application {
         Arg("samples_per_channel") = 8192UL,  // Number of complex samples after I/Q conversion
         Arg("data_format") = std::string("interleaved_iq"),
         Arg("burst_size") = 1024,
-        Arg("num_bursts") = 8);
+        Arg("num_bursts") = 8,
+        Arg("adc_bits") = 12);  // Pluto SDR uses 12-bit ADC
 
     // FFT operator - performs FFT on the CUDA tensor
     auto fft_op = make_operator<ops::FFT>("fft",
@@ -54,7 +55,7 @@ class PlutoFFTExample : public holoscan::Application {
                                           Arg("spectrum_type") = static_cast<uint8_t>(0),
                                           Arg("averaging_type") = static_cast<uint8_t>(0),
                                           Arg("window_time") = static_cast<uint8_t>(0),
-                                          Arg("window_type") = static_cast<uint8_t>(0),
+                                          Arg("window_type") = static_cast<uint8_t>(1),
                                           Arg("transform_points") = static_cast<uint32_t>(1024),
                                           Arg("window_points") = static_cast<uint32_t>(1024),
                                           Arg("resolution") = static_cast<uint64_t>(1000),
@@ -65,17 +66,19 @@ class PlutoFFTExample : public holoscan::Application {
                                           Arg("window_time_delta") = static_cast<uint32_t>(1000));
 
     // FFTGnuplotOp - generates gnuplot visualization and exits
-    auto fft_gnuplot_op =
-        make_operator<ops::FFTGnuplotOp>("fft_gnuplot",
-                                         Arg("output_file") = std::string("pluto_fft_spectrum"),
-                                         Arg("selected_burst") = 0,
-                                         Arg("max_frequency") = 1000000.0f,  // 1 MHz
-                                         Arg("log_scale") = true);
+    auto fft_gnuplot_op = make_operator<ops::FFTGnuplotOp>(
+        "fft_gnuplot",
+        Arg("output_file") = std::string("pluto_fft_spectrum"),
+        Arg("selected_burst") = 0,
+        Arg("max_frequency") = 30720000.0f / 2,  // 1 MHz
+        Arg("log_scale") = true,
+        Arg("power_offset") = 0.0f,  // Can be adjusted for calibration
+        Arg("adc_bits") = 12);
 
     // Connect the operators in the specified flow
-    // add_flow(iio_buf_read_op, iio_convert_op, {{"buffer", "buffer_in"}});
-    // add_flow(iio_convert_op, buffer_to_tensor_op, {{"buffer_out", "buffer"}});
-    add_flow(iio_buf_read_op, buffer_to_tensor_op, {{"buffer", "buffer"}});
+    add_flow(iio_buf_read_op, iio_convert_op, {{"buffer", "buffer_in"}});
+    add_flow(iio_convert_op, buffer_to_tensor_op, {{"buffer_out", "buffer"}});
+    // add_flow(iio_buf_read_op, buffer_to_tensor_op, {{"buffer", "buffer"}});
     add_flow(buffer_to_tensor_op, fft_op, {{"tensor", "in"}});
     add_flow(fft_op, fft_gnuplot_op, {{"out", "buffer"}});
   }

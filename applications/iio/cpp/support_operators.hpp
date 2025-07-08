@@ -568,26 +568,9 @@ class FFTGnuplotOp : public Operator {
                burst_size * sizeof(complex),
                cudaMemcpyDeviceToHost);
 
-    // Convert to magnitude spectrum using GNU Radio method
-    std::vector<float> magnitude_spectrum(burst_size);
-
-    // FFT normalization factor
-    float fft_normalization =
-        1.0f / (static_cast<float>(burst_size) * static_cast<float>(burst_size));
-
-    for (size_t i = 0; i < burst_size; ++i) {
-      // Calculate magnitude squared
-      float real = host_data[i].real();
-      float imag = host_data[i].imag();
-      float mag_squared = real * real + imag * imag;
-
-      // Apply FFT size normalization
-      float normalized_power = mag_squared * fft_normalization;
-
-      // Apply logarithmic scale if enabled
-      float db_value = (normalized_power > 1e-10f) ? 10.0f * std::log10(normalized_power) : -160.0f;
-      magnitude_spectrum[i] = db_value + power_offset_.get();  // Add power offset
-    }
+    // Convert to magnitude spectrum using common utility function
+    auto magnitude_spectrum = fft_utils::convertToMagnitudeSpectrum(
+        host_data, burst_size, power_offset_.get());
 
     // Write data file for gnuplot with frequency axis from -fs/2 to +fs/2
     std::string data_file = output_file_.get() + ".dat";
@@ -604,12 +587,9 @@ class FFTGnuplotOp : public Operator {
     }
     data_stream.close();
 
-    // Find peak frequency for title
-    auto peak_it = std::max_element(magnitude_spectrum.begin(), magnitude_spectrum.end());
-    size_t peak_bin = std::distance(magnitude_spectrum.begin(), peak_it);
-    // Calculate peak frequency in MHz using the same axis mapping
-    float peak_freq_mhz =
-        (static_cast<float>(peak_bin) - static_cast<float>(burst_size) / 2.0f) * freq_step_mhz;
+    // Find peak frequency for title using common utility function
+    auto [peak_freq_mhz, peak_magnitude] = fft_utils::findPeakFrequency(
+        magnitude_spectrum, burst_size, freq_step_mhz);
 
     // Create gnuplot script
     std::string script_file = output_file_.get() + ".gp";
@@ -617,9 +597,9 @@ class FFTGnuplotOp : public Operator {
 
     script_stream << "set terminal png size 1200,800\n";
     script_stream << "set output '" << output_file_.get() << ".png'\n";
-    script_stream << "set title 'Pluto SDR FFT Spectrum - Peak at " << std::fixed
-                  << std::setprecision(2) << peak_freq_mhz << " MHz (" << std::setprecision(2)
-                  << *peak_it << " dB)'\n";
+    script_stream << "set title 'Pluto SDR FFT Spectrum - Peak: " << std::fixed
+                  << std::setprecision(2) << peak_freq_mhz << " MHz (" << std::setprecision(1)
+                  << peak_magnitude << " dB)'\n";
     script_stream << "set xlabel 'Frequency (MHz)'\n";
     script_stream << "set ylabel 'Magnitude (dB)'\n";
 
@@ -635,7 +615,7 @@ class FFTGnuplotOp : public Operator {
     if (result == 0) {
       HOLOSCAN_LOG_INFO("Gnuplot spectrum saved to: {}.png", output_file_.get());
       HOLOSCAN_LOG_INFO(
-          "Peak frequency: {:.2f} MHz with magnitude: {:.2f} dB", peak_freq_mhz, *peak_it);
+          "Peak frequency: {:.2f} MHz with magnitude: {:.1f} dB", peak_freq_mhz, peak_magnitude);
     } else {
       HOLOSCAN_LOG_ERROR("Gnuplot execution failed with return code: {}", result);
     }
@@ -752,32 +732,21 @@ class FFTGnuplotRealtimeOp : public Operator {
                burst_size * sizeof(complex),
                cudaMemcpyDeviceToHost);
 
-    // Convert to magnitude spectrum using GNU Radio method
-    std::vector<float> magnitude_spectrum(burst_size);
+    // Convert to magnitude spectrum using common utility function
+    auto magnitude_spectrum = fft_utils::convertToMagnitudeSpectrum(
+        host_data, burst_size, power_offset_.get(), 1e-20f);
 
-    // FFT normalization factor
-    float fft_normalization =
-        1.0f / (static_cast<float>(burst_size) * static_cast<float>(burst_size));
-
-    for (size_t i = 0; i < burst_size; ++i) {
-      // Calculate magnitude squared
-      float real = host_data[i].real();
-      float imag = host_data[i].imag();
-      float mag_squared = real * real + imag * imag;
-
-      // Apply FFT size normalization
-      float normalized_power = mag_squared * fft_normalization;
-
-      // Apply logarithmic scale if enabled
-      float db_value = (normalized_power > 1e-20f) ? 10.0f * std::log10(normalized_power) : -160.0f;
-      magnitude_spectrum[i] = db_value + power_offset_.get();
-    }
-
-    // Send data to gnuplot
-    fprintf(gnuplot_pipe_, "plot '-' with lines linestyle 1 title 'FFT Magnitude'\n");
-
+    // Find peak frequency for title
     float freq_step = max_frequency_.get() / static_cast<float>(burst_size);
     float freq_step_mhz = freq_step / 1e6f;
+    auto [peak_freq_mhz, peak_magnitude] = fft_utils::findPeakFrequency(
+        magnitude_spectrum, burst_size, freq_step_mhz);
+
+    // Send data to gnuplot with updated title showing peak
+    fprintf(gnuplot_pipe_, 
+            "set title 'Pluto SDR Real-Time FFT - Peak: %.2f MHz (%.1f dB)'\n",
+            peak_freq_mhz, peak_magnitude);
+    fprintf(gnuplot_pipe_, "plot '-' with lines linestyle 1 title 'FFT Magnitude'\n");
 
     for (size_t i = 0; i < burst_size; ++i) {
       // Map frequency axis to [-fs/2, +fs/2] range in MHz

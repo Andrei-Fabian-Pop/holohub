@@ -27,7 +27,6 @@
 #include "iio_configurator.hpp"
 #include "iio_params.hpp"
 #include "pluto_fft_example.hpp"
-#include "pluto_fft_realtime_example.hpp"
 #include "support_operators.hpp"
 
 #include <dlpack/dlpack.h>

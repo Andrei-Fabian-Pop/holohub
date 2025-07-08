@@ -101,7 +101,6 @@ class PlutoFFTExample : public holoscan::Application {
       auto fft_gnuplot_realtime_op = make_operator<ops::FFTGnuplotRealtimeOp>(
           "fft_gnuplot_realtime",
           Arg("max_frequency") = static_cast<float>(sample_rate_hz),
-          Arg("log_scale") = true,
           Arg("power_offset") = 0.0f,  // Can be adjusted for calibration
           Arg("adc_bits") = adc_bits,
           Arg("update_interval") = 10,
@@ -119,7 +118,6 @@ class PlutoFFTExample : public holoscan::Application {
           Arg("output_file") = std::string("pluto_fft_spectrum"),
           Arg("selected_burst") = 0,
           Arg("max_frequency") = static_cast<float>(sample_rate_hz),
-          Arg("log_scale") = true,
           Arg("power_offset") = 0.0f,  // Can be adjusted for calibration
           Arg("adc_bits") = adc_bits);
 

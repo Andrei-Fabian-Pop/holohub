@@ -42,6 +42,10 @@ static constexpr int G_NUM_CHANNELS = 2;  // Set to 1 or 2 to control number of 
 
 namespace holoscan::ops {
 
+// =============================================================================
+// Basic Test/Debug Operators
+// =============================================================================
+
 class BasicPrinterOp : public Operator {
  public:
   HOLOSCAN_OPERATOR_FORWARD_ARGS(BasicPrinterOp);
@@ -70,6 +74,10 @@ class BasicEmitterOp : public Operator {
   }
 };
 
+// =============================================================================
+// IIO Buffer Test Operators
+// =============================================================================
+
 class BasicIIOBufferEmitterOP : public Operator {
  public:
   HOLOSCAN_OPERATOR_FORWARD_ARGS(BasicIIOBufferEmitterOP);
@@ -91,17 +99,18 @@ class BasicIIOBufferEmitterOP : public Operator {
   }
 
   void compute(InputContext&, OutputContext& op_output, ExecutionContext&) override {
-    uint enabled_channels = G_NUM_CHANNELS;
-    ulong total_samples = 8192;                            // Total samples PER CHANNEL
-    ulong buffer_size = total_samples * enabled_channels;  // Total buffer size
-    float frequency = 8;
-    float amplitude = 408;
-    float sample_rate = 400;
+    // Test signal parameters
+    constexpr uint enabled_channels = G_NUM_CHANNELS;
+    constexpr ulong total_samples = 8192;                            // Total samples PER CHANNEL
+    constexpr ulong buffer_size = total_samples * enabled_channels;  // Total buffer size
+    constexpr float frequency = 8.0f;
+    constexpr float amplitude = 408.0f;
+    constexpr float sample_rate = 400.0f;
 
-    // These variables are just for conversion (pluto does not necessarily need them)
-    std::string device_name = "cf-ad9361-dds-core-lpc";
-    std::string channel_name = "voltage0";
-    std::string channel_name2 = "voltage1";
+    // Device configuration (for test purposes)
+    const std::string device_name = "cf-ad9361-dds-core-lpc";
+    const std::string channel_name = "voltage0";
+    const std::string channel_name2 = "voltage1";
 
     iio_context* ctx = iio_create_context_from_uri(G_URI);
     iio_device* dev = iio_context_find_device(ctx, device_name.c_str());
@@ -113,10 +122,12 @@ class BasicIIOBufferEmitterOP : public Operator {
     std::vector<int16_t> data_vector2 =
         generateSineWave(total_samples, frequency, amplitude / 2, sample_rate);
 
-    auto buffer_info = std::shared_ptr<iio_buffer_info_t>(new iio_buffer_info_t);
-    buffer_info->buffer = new int16_t[buffer_size];  // pluto has a sample size of 2 bytes
+    // Create buffer info structure
+    auto buffer_info = std::make_shared<iio_buffer_info_t>();
+    buffer_info->buffer = new int16_t[buffer_size];
     buffer_info->is_cyclic = true;
     buffer_info->device_name = device_name;
+    buffer_info->samples_count = total_samples;
 
     // Populate enabled channels
     iio_channel_info_t ch1_info;
@@ -131,27 +142,21 @@ class BasicIIOBufferEmitterOP : public Operator {
       buffer_info->enabled_channels.push_back(ch2_info);
     }
 
-    // Interleave samples for multi-channel setup
+    // Fill buffer with interleaved samples for multi-channel setup
+    auto* buffer = static_cast<int16_t*>(buffer_info->buffer);
     for (size_t sample_idx = 0; sample_idx < total_samples; ++sample_idx) {
       size_t buffer_idx = sample_idx * enabled_channels;
 
       // Channel 0
-      static_cast<int16_t*>(buffer_info->buffer)[buffer_idx] = data_vector[sample_idx];
-      iio_channel_convert_inverse(chn,
-                                  static_cast<int16_t*>(buffer_info->buffer) + buffer_idx,
-                                  static_cast<int16_t*>(buffer_info->buffer) + buffer_idx);
+      buffer[buffer_idx] = data_vector[sample_idx];
+      iio_channel_convert_inverse(chn, &buffer[buffer_idx], &buffer[buffer_idx]);
 
       // Channel 1 (if enabled)
       if (enabled_channels == 2) {
-        static_cast<int16_t*>(buffer_info->buffer)[buffer_idx + 1] = data_vector2[sample_idx];
-        iio_channel_convert_inverse(chn2,
-                                    static_cast<int16_t*>(buffer_info->buffer) + buffer_idx + 1,
-                                    static_cast<int16_t*>(buffer_info->buffer) + buffer_idx + 1);
+        buffer[buffer_idx + 1] = data_vector2[sample_idx];
+        iio_channel_convert_inverse(chn2, &buffer[buffer_idx + 1], &buffer[buffer_idx + 1]);
       }
     }
-
-    // samples_count represents the number of samples per channel
-    buffer_info->samples_count = total_samples;
 
     // Emit the buffer info
     op_output.emit(buffer_info, "buffer");
@@ -168,49 +173,51 @@ class BasicIIOBufferPrinterOP : public Operator {
 
   void compute(InputContext& op_input, OutputContext&, ExecutionContext&) override {
     auto buffer_info = op_input.receive<std::shared_ptr<iio_buffer_info_t>>("buffer").value();
-    if (buffer_info->buffer == nullptr) {
+    if (!buffer_info || !buffer_info->buffer) {
       HOLOSCAN_LOG_ERROR("Buffer is null");
       return;
     }
 
-    uint enabled_channels = buffer_info->enabled_channels.size();
+    const uint enabled_channels = buffer_info->enabled_channels.size();
 
-    // Print the buffer info including new fields
-    HOLOSCAN_LOG_INFO(
-        "Buffer info: samples_count = {}, device = {}, cyclic = {}, enabled_channels = {}",
-        buffer_info->samples_count,
-        buffer_info->device_name,
-        buffer_info->is_cyclic,
-        buffer_info->enabled_channels.size());
+    // Print buffer metadata
+    HOLOSCAN_LOG_INFO("Buffer info: samples_count={}, device={}, cyclic={}, channels={}",
+                      buffer_info->samples_count,
+                      buffer_info->device_name,
+                      buffer_info->is_cyclic,
+                      enabled_channels);
 
     // Print channel information
     for (const auto& ch : buffer_info->enabled_channels) {
       HOLOSCAN_LOG_INFO("  Channel: {} ({})", ch.name, ch.is_output ? "output" : "input");
     }
 
-    // Print first few samples
-    const size_t samples_to_print = 100;  // Per channel
-    HOLOSCAN_LOG_INFO("First {} samples per channel:", samples_to_print);
+    // Print sample data
+    printSampleData(buffer_info, enabled_channels);
+  }
+
+ private:
+  void printSampleData(std::shared_ptr<iio_buffer_info_t> buffer_info,
+                       uint enabled_channels) const {
+    constexpr size_t samples_to_print = 100;
+    const auto* buffer = static_cast<int16_t*>(buffer_info->buffer);
+    const size_t max_samples = std::min(samples_to_print, buffer_info->samples_count);
+
+    HOLOSCAN_LOG_INFO("First {} samples per channel:", max_samples);
 
     if (enabled_channels == 1) {
       std::cout << "Channel 0: ";
-      for (size_t i = 0; i < std::min(samples_to_print, buffer_info->samples_count); ++i) {
-        std::cout << static_cast<int16_t*>(buffer_info->buffer)[i] << " ";
-      }
+      for (size_t i = 0; i < max_samples; ++i) { std::cout << buffer[i] << " "; }
       std::cout << std::endl;
     } else {
       // Print interleaved samples for each channel
-      std::cout << "Channel 0: ";
-      for (size_t i = 0; i < std::min(samples_to_print, buffer_info->samples_count); ++i) {
-        std::cout << static_cast<int16_t*>(buffer_info->buffer)[i * enabled_channels] << " ";
+      for (uint ch = 0; ch < enabled_channels; ++ch) {
+        std::cout << "Channel " << ch << ": ";
+        for (size_t i = 0; i < max_samples; ++i) {
+          std::cout << buffer[i * enabled_channels + ch] << " ";
+        }
+        std::cout << std::endl;
       }
-      std::cout << std::endl;
-
-      std::cout << "Channel 1: ";
-      for (size_t i = 0; i < std::min(samples_to_print, buffer_info->samples_count); ++i) {
-        std::cout << static_cast<int16_t*>(buffer_info->buffer)[i * enabled_channels + 1] << " ";
-      }
-      std::cout << std::endl;
     }
   }
 };
@@ -224,6 +231,10 @@ class BasicWaitOp : public Operator {
   void setup(OperatorSpec&) override {}
   void compute(InputContext&, OutputContext&, ExecutionContext&) override { sleep(20); }
 };
+
+// =============================================================================
+// IIO Channel Conversion Operator
+// =============================================================================
 
 class IIOChannelConvertOp : public Operator {
  public:
@@ -359,6 +370,10 @@ class IIOChannelConvertOp : public Operator {
   iio_device* iio_device_;
 };
 
+// =============================================================================
+// CUDA Tensor Conversion Operator
+// =============================================================================
+
 class IIOBuffer2CudaTensorOp : public Operator {
  public:
   HOLOSCAN_OPERATOR_FORWARD_ARGS(IIOBuffer2CudaTensorOp);
@@ -423,14 +438,6 @@ class IIOBuffer2CudaTensorOp : public Operator {
     // Convert data based on format
     if (data_format_.get() == "interleaved_iq") {
       convertInterleavedIQToComplex(samples, samples_per_channel * 2);
-      // For single channel with interleaved I/Q data
-      // if (num_channels == 1) {
-      //   // samples_per_channel is the number of I/Q pairs (complex samples)
-      //   // But the raw buffer has 2x that many int16 values (I and Q separate)
-      // } else {
-      //   // For multiple channels with interleaved channel data
-      //   convertMultiChannelToComplex(samples, num_channels, samples_per_channel);
-      // }
     }
 
     // Emit the tensor with stream
@@ -463,31 +470,6 @@ class IIOBuffer2CudaTensorOp : public Operator {
                     stream_);
   }
 
-  void convertMultiChannelToComplex(const int16_t* samples, size_t num_channels,
-                                    size_t samples_per_channel) {
-    // Scale factor to convert int16 to float [-1.0, 1.0]
-    constexpr float scalar = 1.0f / 32767.0f;
-
-    // Create temporary host buffer
-    std::vector<complex> host_data(num_channels * samples_per_channel);
-
-    // Convert multi-channel interleaved data
-    for (size_t ch = 0; ch < num_channels; ++ch) {
-      for (size_t s = 0; s < samples_per_channel; ++s) {
-        // Assuming real-only data for multi-channel (not I/Q pairs)
-        float real = samples[s * num_channels + ch] * scalar;
-        host_data[ch * samples_per_channel + s] = complex(real, 0.0f);
-      }
-    }
-
-    // Copy to GPU
-    cudaMemcpyAsync(output_tensor_.Data(),
-                    host_data.data(),
-                    num_channels * samples_per_channel * sizeof(complex),
-                    cudaMemcpyHostToDevice,
-                    stream_);
-  }
-
   Parameter<unsigned int> num_channels_;
   Parameter<size_t> samples_per_channel_;
   Parameter<std::string> data_format_;
@@ -499,95 +481,45 @@ class IIOBuffer2CudaTensorOp : public Operator {
   tensor_t<complex, 2> output_tensor_;
 };
 
-class FFTTensorPrinterOp : public Operator {
- public:
-  HOLOSCAN_OPERATOR_FORWARD_ARGS(FFTTensorPrinterOp);
-  FFTTensorPrinterOp() = default;
-  ~FFTTensorPrinterOp() = default;
+// =============================================================================
+// FFT Visualization Operators
+// =============================================================================
 
-  void setup(OperatorSpec& spec) override {
-    spec.input<std::tuple<tensor_t<complex, 2>, cudaStream_t>>("buffer");
-    spec.param(samples_to_print_,
-               "samples_to_print",
-               "Samples to print",
-               "Number of FFT samples to print",
-               20UL);
+// Common FFT processing utilities
+namespace fft_utils {
+inline std::vector<float> convertToMagnitudeSpectrum(const std::vector<complex>& host_data,
+                                                     size_t burst_size, float power_offset,
+                                                     float noise_floor_threshold = 1e-10f) {
+  std::vector<float> magnitude_spectrum(burst_size);
+  const float fft_normalization =
+      1.0f / (static_cast<float>(burst_size) * static_cast<float>(burst_size));
+
+  for (size_t i = 0; i < burst_size; ++i) {
+    // Calculate magnitude squared
+    const float real = host_data[i].real();
+    const float imag = host_data[i].imag();
+    const float mag_squared = real * real + imag * imag;
+
+    // Apply FFT size normalization
+    const float normalized_power = mag_squared * fft_normalization;
+
+    // Apply logarithmic scale
+    const float db_value =
+        (normalized_power > noise_floor_threshold) ? 10.0f * std::log10(normalized_power) : -160.0f;
+    magnitude_spectrum[i] = db_value + power_offset;
   }
+  return magnitude_spectrum;
+}
 
-  void compute(InputContext& op_input, OutputContext&, ExecutionContext&) override {
-    auto tensor_data =
-        op_input.receive<std::tuple<tensor_t<complex, 2>, cudaStream_t>>("buffer").value();
-    auto& tensor = std::get<0>(tensor_data);
-    auto stream = std::get<1>(tensor_data);
-
-    // Synchronize stream to ensure data is ready
-    cudaStreamSynchronize(stream);
-
-    // Get tensor dimensions
-    auto shape = tensor.Shape();
-    size_t num_bursts = shape[0];  // First dimension is bursts, not channels
-    size_t burst_size = shape[1];  // FFT size per burst
-
-    HOLOSCAN_LOG_INFO("FFT Output - Shape: {}x{} (bursts x FFT bins)", num_bursts, burst_size);
-
-    // Copy data to host for printing
-    size_t samples_to_print = std::min(samples_to_print_.get(), burst_size);
-    std::vector<complex> host_data(num_bursts * samples_to_print);
-
-    cudaMemcpy(host_data.data(),
-               tensor.Data(),
-               num_bursts * samples_to_print * sizeof(complex),
-               cudaMemcpyDeviceToHost);
-
-    // Print FFT results for each burst
-    for (size_t burst = 0; burst < num_bursts; ++burst) {
-      HOLOSCAN_LOG_INFO("Burst {}: First {} FFT bins (magnitude):", burst, samples_to_print);
-      std::cout << "  ";
-      for (size_t s = 0; s < samples_to_print; ++s) {
-        complex val = host_data[burst * samples_to_print + s];
-        float magnitude = cuda::std::abs(val);
-        std::cout << std::fixed << std::setprecision(3) << magnitude << " ";
-      }
-      std::cout << std::endl;
-
-      // Also print phase information for first few samples
-      HOLOSCAN_LOG_INFO("Burst {}: Phase (radians) for first 10 bins:", burst);
-      std::cout << "  ";
-      for (size_t s = 0; s < std::min(10UL, samples_to_print); ++s) {
-        complex val = host_data[burst * samples_to_print + s];
-        float phase = cuda::std::arg(val);
-        std::cout << std::fixed << std::setprecision(3) << phase << " ";
-      }
-      std::cout << std::endl;
-    }
-
-    // Print DC component and max magnitude
-    complex dc_component = host_data[0];
-    HOLOSCAN_LOG_INFO("DC Component: {} + {}i (magnitude: {})",
-                      dc_component.real(),
-                      dc_component.imag(),
-                      cuda::std::abs(dc_component));
-
-    // Find max magnitude across all bursts
-    float max_magnitude = 0.0f;
-    size_t max_burst = 0;
-    size_t max_bin = 0;
-    for (size_t burst = 0; burst < num_bursts; ++burst) {
-      for (size_t bin = 0; bin < samples_to_print; ++bin) {
-        float mag = cuda::std::abs(host_data[burst * samples_to_print + bin]);
-        if (mag > max_magnitude) {
-          max_magnitude = mag;
-          max_burst = burst;
-          max_bin = bin;
-        }
-      }
-    }
-    HOLOSCAN_LOG_INFO("Max magnitude: {} at burst {} bin {}", max_magnitude, max_burst, max_bin);
-  }
-
- private:
-  Parameter<size_t> samples_to_print_;
-};
+inline std::pair<float, float> findPeakFrequency(const std::vector<float>& magnitude_spectrum,
+                                                 size_t burst_size, float freq_step_mhz) {
+  auto peak_it = std::max_element(magnitude_spectrum.begin(), magnitude_spectrum.end());
+  size_t peak_bin = std::distance(magnitude_spectrum.begin(), peak_it);
+  float peak_freq_mhz =
+      (static_cast<float>(peak_bin) - static_cast<float>(burst_size) / 2.0f) * freq_step_mhz;
+  return {peak_freq_mhz, *peak_it};
+}
+}  // namespace fft_utils
 
 class FFTGnuplotOp : public Operator {
  public:
@@ -605,7 +537,6 @@ class FFTGnuplotOp : public Operator {
     spec.param(selected_burst_, "selected_burst", "Selected burst", "Which burst to plot", 0);
     spec.param(
         max_frequency_, "max_frequency", "Max frequency", "Maximum frequency (Hz)", 1000000.0f);
-    spec.param(log_scale_, "log_scale", "Log scale", "Use logarithmic magnitude scale", true);
     spec.param(power_offset_, "power_offset", "Power offset", "Power offset in dB", 0.0f);
     spec.param(adc_bits_, "adc_bits", "ADC bits", "ADC resolution in bits", 12);
   }
@@ -640,12 +571,12 @@ class FFTGnuplotOp : public Operator {
     // Convert to magnitude spectrum using GNU Radio method
     std::vector<float> magnitude_spectrum(burst_size);
 
-    // FFT normalization factor (like GNU Radio's mult_const1)
+    // FFT normalization factor
     float fft_normalization =
         1.0f / (static_cast<float>(burst_size) * static_cast<float>(burst_size));
 
     for (size_t i = 0; i < burst_size; ++i) {
-      // Calculate magnitude squared (like GNU Radio's complex_to_mag_squared)
+      // Calculate magnitude squared
       float real = host_data[i].real();
       float imag = host_data[i].imag();
       float mag_squared = real * real + imag * imag;
@@ -653,14 +584,9 @@ class FFTGnuplotOp : public Operator {
       // Apply FFT size normalization
       float normalized_power = mag_squared * fft_normalization;
 
-      // Apply logarithmic scale if enabled (like GNU Radio's nlog10)
-      if (log_scale_.get()) {
-        float db_value =
-            (normalized_power > 1e-10f) ? 10.0f * std::log10(normalized_power) : -200.0f;
-        magnitude_spectrum[i] = db_value + power_offset_.get();  // Add power offset
-      } else {
-        magnitude_spectrum[i] = std::sqrt(normalized_power);  // Convert back to magnitude
-      }
+      // Apply logarithmic scale if enabled
+      float db_value = (normalized_power > 1e-10f) ? 10.0f * std::log10(normalized_power) : -160.0f;
+      magnitude_spectrum[i] = db_value + power_offset_.get();  // Add power offset
     }
 
     // Write data file for gnuplot with frequency axis from -fs/2 to +fs/2
@@ -695,12 +621,7 @@ class FFTGnuplotOp : public Operator {
                   << std::setprecision(2) << peak_freq_mhz << " MHz (" << std::setprecision(2)
                   << *peak_it << " dB)'\n";
     script_stream << "set xlabel 'Frequency (MHz)'\n";
-
-    if (log_scale_.get()) {
-      script_stream << "set ylabel 'Magnitude (dB)'\n";
-    } else {
-      script_stream << "set ylabel 'Magnitude'\n";
-    }
+    script_stream << "set ylabel 'Magnitude (dB)'\n";
 
     script_stream << "set grid\n";
     script_stream << "set style line 1 linecolor rgb '#00ff00' linewidth 2\n";
@@ -737,7 +658,6 @@ class FFTGnuplotOp : public Operator {
   Parameter<std::string> output_file_;
   Parameter<int> selected_burst_;
   Parameter<float> max_frequency_;
-  Parameter<bool> log_scale_;
   Parameter<float> power_offset_;
   Parameter<int> adc_bits_;
 };
@@ -757,7 +677,6 @@ class FFTGnuplotRealtimeOp : public Operator {
     spec.input<std::tuple<tensor_t<complex, 2>, cudaStream_t>>("buffer");
     spec.param(
         max_frequency_, "max_frequency", "Max frequency", "Maximum frequency (Hz)", 1000000.0f);
-    spec.param(log_scale_, "log_scale", "Log scale", "Use logarithmic magnitude scale", true);
     spec.param(power_offset_, "power_offset", "Power offset", "Power offset in dB", 0.0f);
     spec.param(adc_bits_, "adc_bits", "ADC bits", "ADC resolution in bits", 12);
     spec.param(update_interval_,
@@ -769,7 +688,7 @@ class FFTGnuplotRealtimeOp : public Operator {
                "y_range",
                "Y-axis range",
                "Y-axis range [min, max]",
-               std::vector<float>{-200.0f, 0.0f});
+               std::vector<float>{-160.0f, 0.0f});
   }
 
   void initialize() override {
@@ -787,12 +706,8 @@ class FFTGnuplotRealtimeOp : public Operator {
     fprintf(gnuplot_pipe_, "set title 'Pluto SDR Real-Time FFT Spectrum'\n");
     fprintf(gnuplot_pipe_, "set xlabel 'Frequency (MHz)'\n");
 
-    if (log_scale_.get()) {
-      fprintf(gnuplot_pipe_, "set ylabel 'Magnitude (dB)'\n");
-      fprintf(gnuplot_pipe_, "set yrange [%f:%f]\n", y_range_.get()[0], y_range_.get()[1]);
-    } else {
-      fprintf(gnuplot_pipe_, "set ylabel 'Magnitude'\n");
-    }
+    fprintf(gnuplot_pipe_, "set ylabel 'Magnitude (dB)'\n");
+    fprintf(gnuplot_pipe_, "set yrange [%f:%f]\n", y_range_.get()[0], y_range_.get()[1]);
 
     fprintf(gnuplot_pipe_, "set grid\n");
     fprintf(gnuplot_pipe_, "set style line 1 linecolor rgb '#00ff00' linewidth 2\n");
@@ -854,13 +769,8 @@ class FFTGnuplotRealtimeOp : public Operator {
       float normalized_power = mag_squared * fft_normalization;
 
       // Apply logarithmic scale if enabled
-      if (log_scale_.get()) {
-        float db_value =
-            (normalized_power > 1e-20f) ? 10.0f * std::log10(normalized_power) : -200.0f;
-        magnitude_spectrum[i] = db_value + power_offset_.get();
-      } else {
-        magnitude_spectrum[i] = std::sqrt(normalized_power);
-      }
+      float db_value = (normalized_power > 1e-20f) ? 10.0f * std::log10(normalized_power) : -160.0f;
+      magnitude_spectrum[i] = db_value + power_offset_.get();
     }
 
     // Send data to gnuplot
@@ -881,7 +791,6 @@ class FFTGnuplotRealtimeOp : public Operator {
 
  private:
   Parameter<float> max_frequency_;
-  Parameter<bool> log_scale_;
   Parameter<float> power_offset_;
   Parameter<int> adc_bits_;
   Parameter<int> update_interval_;

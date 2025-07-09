@@ -12,15 +12,24 @@
 # License for the specific language governing permissions and limitations under
 # the License.
 
-import os
 import math
+import os
 import struct
-import iio
 from typing import List
 
-from holoscan.core import Application, Operator, OperatorSpec
+import iio
 from holoscan.conditions import CountCondition
-from holohub.iio_controller import IIOAttributeRead, IIOAttributeWrite, IIOConfigurator, IIOBufferWrite, IIOBufferRead, IIOBufferInfo, IIOChannelInfo
+from holoscan.core import Application, Operator, OperatorSpec
+
+from holohub.iio_controller import (
+    IIOAttributeRead,
+    IIOAttributeWrite,
+    IIOBufferInfo,
+    IIOBufferRead,
+    IIOBufferWrite,
+    IIOChannelInfo,
+    IIOConfigurator,
+)
 
 G_NUM_REPETITIONS = 10
 G_URI = "ip:192.168.2.1"
@@ -69,11 +78,7 @@ class BasicIIOBufferEmitterOp(Operator):
         spec.output("buffer")
 
     def generate_sinewave(
-            self,
-            num_samples: int,
-            frequency: float,
-            amplitude: float,
-            sample_rate: float
+        self, num_samples: int, frequency: float, amplitude: float, sample_rate: float
     ) -> List[int]:
         """Generates an array with samples of a sine wave.
 
@@ -89,8 +94,7 @@ class BasicIIOBufferEmitterOp(Operator):
         sine_wave = []
         for i in range(num_samples):
             time = i / sample_rate
-            sample_value = int(
-                amplitude * math.sin(2 * math.pi * frequency * time))
+            sample_value = int(amplitude * math.sin(2 * math.pi * frequency * time))
             sine_wave.append(sample_value)
 
         return sine_wave
@@ -115,15 +119,10 @@ class BasicIIOBufferEmitterOp(Operator):
             return
 
         chn = dev.find_channel(channel_name, True)  # True = output channel
-        chn2 = dev.find_channel(
-            channel_name2, True) if enabled_channels == 2 else None
+        chn2 = dev.find_channel(channel_name2, True) if enabled_channels == 2 else None
 
-        data_vector = self.generate_sinewave(
-            total_samples, frequency, amplitude, sample_rate
-        )
-        data_vector2 = self.generate_sinewave(
-            total_samples, frequency, amplitude // 2, sample_rate
-        )
+        data_vector = self.generate_sinewave(total_samples, frequency, amplitude, sample_rate)
+        data_vector2 = self.generate_sinewave(total_samples, frequency, amplitude // 2, sample_rate)
 
         # Create buffer info structure
         buffer_info = IIOBufferInfo()
@@ -140,13 +139,12 @@ class BasicIIOBufferEmitterOp(Operator):
 
             # Channel 0
             sample0 = data_vector[sample_idx]
-            struct.pack_into('<h', buffer_data, buffer_idx * 2, sample0)
+            struct.pack_into("<h", buffer_data, buffer_idx * 2, sample0)
 
             # Channel 1 (if enabled)
             if enabled_channels == 2:
                 sample1 = data_vector2[sample_idx]
-                struct.pack_into('<h', buffer_data,
-                                 (buffer_idx + 1) * 2, sample1)
+                struct.pack_into("<h", buffer_data, (buffer_idx + 1) * 2, sample1)
 
         # Set buffer info properties
         # samples_count represents the number of samples per channel
@@ -168,8 +166,7 @@ class BasicIIOBufferEmitterOp(Operator):
             buffer_info.enabled_channels.append(ch2_info)
 
         # Emit the buffer info with the correct type
-        op_output.emit(buffer_info, "buffer",
-                       "std::shared_ptr<iio_buffer_info_t>")
+        op_output.emit(buffer_info, "buffer", "std::shared_ptr<iio_buffer_info_t>")
 
 
 class BasicWaitOp(Operator):
@@ -185,6 +182,7 @@ class BasicWaitOp(Operator):
     def compute(self, op_input, op_output, context):
         """Compute method to wait."""
         import time
+
         time.sleep(20)
 
 
@@ -208,8 +206,6 @@ class BasicBufferPrinterOp(Operator):
 
         enabled_channels = len(buffer_info.enabled_channels)
         device_name = buffer_info.device_name
-        channel_name = buffer_info.enabled_channels[0].name if enabled_channels > 0 else ""
-        channel_name2 = buffer_info.enabled_channels[1].name if enabled_channels > 1 else ""
 
         ctx = iio.Context(_context=G_URI)
         dev = ctx.find_device(device_name)
@@ -217,42 +213,43 @@ class BasicBufferPrinterOp(Operator):
             print(f"Device {device_name} was not found.")
             return
 
-        chn = dev.find_channel(channel_name, True)  # True = output channel
-        chn2 = dev.find_channel(
-            channel_name2, True) if enabled_channels == 2 else None
-
         # Convert buffer data back to int16 samples
         buffer_data = buffer_info.buffer
         samples = []
 
         for i in range(0, len(buffer_data), 2):
             if i + 1 < len(buffer_data):
-                sample = struct.unpack('<h', buffer_data[i:i+2])[0]
+                sample = struct.unpack("<h", buffer_data[i : i + 2])[0]
                 samples.append(sample)
 
         # Print the buffer info including
-        print(f"Buffer info: samples_count = {buffer_info.samples_count}, "
-              f"device = {buffer_info.device_name}, "
-              f"cyclic = {buffer_info.is_cyclic}, "
-              f"enabled_channels = {len(buffer_info.enabled_channels)}")
+        print(
+            f"Buffer info: samples_count = {buffer_info.samples_count}, "
+            f"device = {buffer_info.device_name}, "
+            f"cyclic = {buffer_info.is_cyclic}, "
+            f"enabled_channels = {len(buffer_info.enabled_channels)}"
+        )
 
         # Print channel information
         for ch in buffer_info.enabled_channels:
-            print(
-                f"Channel: {ch.name} ({'output' if ch.is_output else 'input'})")
+            print(f"Channel: {ch.name} ({'output' if ch.is_output else 'input'})")
 
         # Print first X samples per channel
         samples_to_print = 100  # Per channel
         print(f"First {samples_to_print} samples per channel:")
 
         if enabled_channels == 1:
-            print("Channel 0:", " ".join(str(sample)
-                  for sample in samples[:min(samples_to_print, len(samples))]))
+            print(
+                "Channel 0:",
+                " ".join(str(sample) for sample in samples[: min(samples_to_print, len(samples))]),
+            )
         else:
             # Extract and print interleaved samples for each channel
             ch0_samples = []
             ch1_samples = []
-            for i in range(0, min(samples_to_print * enabled_channels, len(samples)), enabled_channels):
+            for i in range(
+                0, min(samples_to_print * enabled_channels, len(samples)), enabled_channels
+            ):
                 if i < len(samples):
                     ch0_samples.append(samples[i])
                 if i + 1 < len(samples):
@@ -280,9 +277,7 @@ class MyApp(Application):
         )
 
         basic_print_op = BasicPrintOp(
-            self,
-            CountCondition(self, G_NUM_REPETITIONS),
-            name="basic_print_op"
+            self, CountCondition(self, G_NUM_REPETITIONS), name="basic_print_op"
         )
 
         self.add_flow(iio_read, basic_print_op, {("value", "value")})
@@ -298,9 +293,7 @@ class MyApp(Application):
         )
 
         basic_emit_op = BasicEmitOp(
-            self,
-            CountCondition(self, G_NUM_REPETITIONS),
-            name="basic_emit_op"
+            self, CountCondition(self, G_NUM_REPETITIONS), name="basic_emit_op"
         )
 
         self.add_flow(basic_emit_op, iio_write, {("value", "value")})
@@ -312,10 +305,8 @@ class MyApp(Application):
         iio_rw_cond = CountCondition(self, 1)
 
         # Channel configuration matching C++ implementation
-        enabled_channels_names_1 = [
-            "voltage0", "voltage1"] if G_NUM_CHANNELS == 2 else ["voltage0"]
-        enabled_channels_input = [
-            False, False] if G_NUM_CHANNELS == 2 else [False]
+        enabled_channels_names_1 = ["voltage0", "voltage1"] if G_NUM_CHANNELS == 2 else ["voltage0"]
+        enabled_channels_input = [False, False] if G_NUM_CHANNELS == 2 else [False]
 
         # Create IIO buffer read operator
         iio_buf_read_op = IIOBufferRead(
@@ -327,18 +318,14 @@ class MyApp(Application):
             samples_count=8192,
             enabled_channel_names=enabled_channels_names_1,
             enabled_channel_input=enabled_channels_input,
-            name="iio_buffer_read"
+            name="iio_buffer_read",
         )
 
         # Create buffer printer operator
-        basic_buffer_printer_op = BasicBufferPrinterOp(
-            self,
-            name="basic_buffer_printer_op"
-        )
+        basic_buffer_printer_op = BasicBufferPrinterOp(self, name="basic_buffer_printer_op")
 
         # RX flow - connect buffer reader to buffer printer
-        self.add_flow(iio_buf_read_op, basic_buffer_printer_op,
-                      {("buffer", "buffer")})
+        self.add_flow(iio_buf_read_op, basic_buffer_printer_op, {("buffer", "buffer")})
 
     def buffer_write_example(self):
         """Example for buffer write operations matching the C++ implementation."""
@@ -363,31 +350,23 @@ class MyApp(Application):
             is_cyclic=True,
             enabled_channel_names=enabled_channels_names_1,
             enabled_channel_output=enabled_channels_output,
-            name="iio_buffer_write_1"
+            name="iio_buffer_write_1",
         )
 
         # Create buffer emitter operator
-        basic_buffer_emitter_op = BasicIIOBufferEmitterOp(
-            self,
-            name="basic_buffer_emitter_op"
-        )
+        basic_buffer_emitter_op = BasicIIOBufferEmitterOp(self, name="basic_buffer_emitter_op")
 
         # Create wait operator for timing
-        basic_wait_op = BasicWaitOp(
-            self,
-            name="basic_wait_op"
-        )
+        basic_wait_op = BasicWaitOp(self, name="basic_wait_op")
 
         # TX flow - connect buffer emitter to buffer writer to wait
-        self.add_flow(basic_buffer_emitter_op,
-                      iio_buf_write_op_1, {("buffer", "buffer")})
+        self.add_flow(basic_buffer_emitter_op, iio_buf_write_op_1, {("buffer", "buffer")})
         self.add_flow(iio_buf_write_op_1, basic_wait_op)
 
     def configurator_example(self):
         config_file_path = self.config().config_file
         print(f"Config file: {config_file_path}")
-        iio_configurator = IIOConfigurator(
-            self, name="iio_configurator_op", cfg=config_file_path)
+        iio_configurator = IIOConfigurator(self, name="iio_configurator_op", cfg=config_file_path)
 
         # self.start_op() will only run the configurator once
         self.add_flow(self.start_op(), iio_configurator)

@@ -211,14 +211,16 @@ void IIOConfigurator::compute(InputContext&, OutputContext&, ExecutionContext& c
       iio_context* ctx = iio_create_context_from_uri(uri.c_str());
       if (ctx == nullptr) {
         HOLOSCAN_LOG_ERROR("Failed to create IIO context from URI: {}", uri);
-        HOLOSCAN_LOG_ERROR("Cannot proceed: IIO context creation failed - stopping graph execution");
+        HOLOSCAN_LOG_ERROR(
+            "Cannot proceed: IIO context creation failed - stopping graph execution");
         GxfGraphInterrupt(context.context());
         return;
       }
 
       if (!cfg["setup"]) {
         HOLOSCAN_LOG_ERROR("No setup configuration found in YAML");
-        HOLOSCAN_LOG_ERROR("Cannot proceed: Missing setup configuration - stopping graph execution");
+        HOLOSCAN_LOG_ERROR(
+            "Cannot proceed: Missing setup configuration - stopping graph execution");
         GxfGraphInterrupt(context.context());
         return;
       }

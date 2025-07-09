@@ -34,7 +34,7 @@ using namespace holoscan;
 
 class PlutoFFTExample : public holoscan::Application {
  public:
-  PlutoFFTExample(bool realtime = false) : realtime_(realtime) {
+  explicit PlutoFFTExample(bool realtime = false) : realtime_(realtime) {
     name_ = realtime_ ? "PlutoFFTRealtimeExample" : "PlutoFFTExample";
   }
 

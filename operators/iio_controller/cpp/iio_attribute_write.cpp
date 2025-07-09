@@ -38,7 +38,7 @@ void IIOAttributeWrite::initialize() {
   HOLOSCAN_LOG_INFO("IIOAttributeWrite initialize");
   Operator::initialize();
 
-  // Cannot work wihout the name of an attribute
+  // Cannot work without the name of an attribute
   attr_type_ = attr_type_t::UNKNOWN;
   attr_name_ = attr_name_p_.get();
 
@@ -66,7 +66,8 @@ void IIOAttributeWrite::initialize() {
   if (dev_ && !chan_p_.get().empty()) {
     chan_ = iio_device_find_channel(dev_, chan_p_.get().c_str(), channel_is_output_.get());
     if (chan_ == nullptr) {
-      HOLOSCAN_LOG_ERROR("Failed to find IIO channel: {} (output: {})", chan_p_.get(), channel_is_output_.get());
+      HOLOSCAN_LOG_ERROR(
+          "Failed to find IIO channel: {} (output: {})", chan_p_.get(), channel_is_output_.get());
       chan_not_found_ = true;
       return;
     }

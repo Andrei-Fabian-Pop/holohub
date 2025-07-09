@@ -55,10 +55,15 @@ class PlutoFFTExample : public holoscan::Application {
     std::vector<bool> enabled_channels_output = {false, false};  // False for input channels
     const size_t num_channels = enabled_channels_names.size();
 
-    // IIOConfigurator operator - configures Pluto SDR once at startup
+    // Start operator for dynamic flow control
+    auto start_router_op = make_operator<ops::StartOp>("start_router");
+
+    // Configuration path
     auto config_file_path = std::filesystem::path(__FILE__).parent_path() / "pluto_fft_config.yaml";
-    auto iio_configurator_op = make_operator<ops::IIOConfigurator>(
-        "iio_configurator", Arg("cfg") = config_file_path.string());
+    auto iio_configurator_op =
+        make_operator<ops::IIOConfigurator>("iio_configurator",
+                                            Arg("cfg") = config_file_path.string(),
+                                            make_condition<CountCondition>("config_count", 1));
 
     // IIOBufferRead operator - reads data from Pluto SDR
     auto iio_buf_read_op =
@@ -114,9 +119,26 @@ class PlutoFFTExample : public holoscan::Application {
           Arg("update_interval") = 10,
           Arg("y_range") = std::vector<float>{-160.0f, 10.0f});  // dB range
 
-      // Connect for real-time flow
-      // Start with configurator to set up Pluto SDR
-      add_flow(start_op(), iio_configurator_op);
+      // Define possible flows for dynamic routing from start operator
+      add_flow(start_router_op, iio_configurator_op);
+      add_flow(start_router_op, iio_buf_read_op);
+
+      // Set dynamic flow control on the start operator
+      set_dynamic_flows(start_router_op,
+                        [iio_configurator_op,
+                         iio_buf_read_op](const std::shared_ptr<holoscan::Operator>& op) mutable {
+                          static bool config_done = false;
+                          if (!config_done) {
+                            HOLOSCAN_LOG_INFO("First run - routing to IIO configurator");
+                            op->add_dynamic_flow(iio_configurator_op);
+                            config_done = true;
+                          } else {
+                            HOLOSCAN_LOG_INFO("Configuration done - routing to data acquisition");
+                            op->add_dynamic_flow(iio_buf_read_op);
+                          }
+                        });
+
+      // Regular data flow connections
       add_flow(iio_buf_read_op, iio_convert_op, {{"buffer", "buffer_in"}});
       add_flow(iio_convert_op, buffer_to_tensor_op, {{"buffer_out", "buffer"}});
       add_flow(buffer_to_tensor_op, fft_op, {{"tensor", "in"}});
@@ -131,9 +153,26 @@ class PlutoFFTExample : public holoscan::Application {
           Arg("power_offset") = 0.0f,  // Can be adjusted for calibration
           Arg("adc_bits") = adc_bits);
 
-      // Connect for one-shot flow
-      // Start with configurator to set up Pluto SDR
-      add_flow(start_op(), iio_configurator_op);
+      // Define possible flows for dynamic routing from start operator
+      add_flow(start_router_op, iio_configurator_op);
+      add_flow(start_router_op, iio_buf_read_op);
+
+      // Set dynamic flow control on the start operator
+      set_dynamic_flows(start_router_op,
+                        [iio_configurator_op,
+                         iio_buf_read_op](const std::shared_ptr<holoscan::Operator>& op) mutable {
+                          static bool config_done_oneshot = false;
+                          if (!config_done_oneshot) {
+                            HOLOSCAN_LOG_INFO("First run - routing to IIO configurator");
+                            op->add_dynamic_flow(iio_configurator_op);
+                            config_done_oneshot = true;
+                          } else {
+                            HOLOSCAN_LOG_INFO("Configuration done - routing to data acquisition");
+                            op->add_dynamic_flow(iio_buf_read_op);
+                          }
+                        });
+
+      // Regular data flow connections
       add_flow(iio_buf_read_op, iio_convert_op, {{"buffer", "buffer_in"}});
       add_flow(iio_convert_op, buffer_to_tensor_op, {{"buffer_out", "buffer"}});
       add_flow(buffer_to_tensor_op, fft_op, {{"tensor", "in"}});

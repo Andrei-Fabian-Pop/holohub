@@ -770,4 +770,23 @@ class FFTGnuplotRealtimeOp : public Operator {
   std::chrono::steady_clock::time_point last_update_time_;
 };
 
+// =============================================================================
+// Start Operator - Empty operator for dynamic flow control routing
+// =============================================================================
+
+class StartOp : public Operator {
+ public:
+  HOLOSCAN_OPERATOR_FORWARD_ARGS(StartOp);
+  StartOp() = default;
+  ~StartOp() = default;
+
+  void setup(OperatorSpec& spec) override {
+    // No inputs or outputs - pure router
+  }
+
+  void compute(InputContext&, OutputContext&, ExecutionContext&) override {
+    // Empty compute - just triggers dynamic flow routing
+  }
+};
+
 }  // namespace holoscan::ops

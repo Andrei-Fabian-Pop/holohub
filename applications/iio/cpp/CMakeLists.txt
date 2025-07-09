@@ -36,7 +36,7 @@ add_executable(
   pluto_fft_example/support_operators.hpp)
 
 target_link_libraries(iio PRIVATE holoscan::core iio_controller
-                                  holoscan::ops::fft matx::matx)
+                                  holoscan::ops::fft matx::matx iio_simple_examples)
 
 # Copy config file
 add_custom_target(
@@ -48,3 +48,7 @@ add_custom_target(
   BYPRODUCTS "${CMAKE_CURRENT_BINARY_DIR}/iio_config.yaml")
 
 add_dependencies(iio iio_config_yaml)
+
+# Add subdirectories
+add_subdirectory(pluto_fft_example)
+add_subdirectory(simple_examples)

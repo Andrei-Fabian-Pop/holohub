@@ -25,6 +25,8 @@ enum class attr_type_t {
 };
 
 struct iio_channel_info_t {
+  // Chn Index
+  // format string
   std::string name;
   bool is_output;
 };

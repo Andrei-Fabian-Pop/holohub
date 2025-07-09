@@ -129,11 +129,11 @@ class PlutoFFTExample : public holoscan::Application {
                          iio_buf_read_op](const std::shared_ptr<holoscan::Operator>& op) mutable {
                           static bool config_done = false;
                           if (!config_done) {
-                            HOLOSCAN_LOG_INFO("First run - routing to IIO configurator");
+                            HOLOSCAN_LOG_DEBUG("First run - routing to IIO configurator");
                             op->add_dynamic_flow(iio_configurator_op);
                             config_done = true;
                           } else {
-                            HOLOSCAN_LOG_INFO("Configuration done - routing to data acquisition");
+                            HOLOSCAN_LOG_DEBUG("Configuration done - routing to data acquisition");
                             op->add_dynamic_flow(iio_buf_read_op);
                           }
                         });

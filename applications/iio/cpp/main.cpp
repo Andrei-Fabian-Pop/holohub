@@ -26,8 +26,8 @@
 #include "iio_buffer_write.hpp"
 #include "iio_configurator.hpp"
 #include "iio_params.hpp"
-#include "pluto_fft_example.hpp"
-#include "support_operators.hpp"
+#include "pluto_fft_example/pluto_fft_example.hpp"
+#include "pluto_fft_example/support_operators.hpp"
 
 #include <dlpack/dlpack.h>
 

@@ -29,8 +29,11 @@ find_package(
 
 find_package(matx CONFIG REQUIRED)
 
-add_executable(iio main.cpp classify_modulation_example.hpp
-                   pluto_fft_example.hpp support_operators.hpp)
+add_executable(
+  iio
+  main.cpp classify_modulation_example.hpp
+  pluto_fft_example/pluto_fft_example.hpp
+  pluto_fft_example/support_operators.hpp)
 
 target_link_libraries(iio PRIVATE holoscan::core iio_controller
                                   holoscan::ops::fft matx::matx)

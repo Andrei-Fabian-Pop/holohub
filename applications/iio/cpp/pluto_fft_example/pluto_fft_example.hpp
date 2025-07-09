@@ -25,7 +25,10 @@
 #include "fft.hpp"
 #include "iio_buffer_read.hpp"
 #include "iio_buffer_write.hpp"
+#include "iio_configurator.hpp"
 #include "support_operators.hpp"
+
+#include <filesystem>
 
 using namespace holoscan;
 
@@ -51,6 +54,11 @@ class PlutoFFTExample : public holoscan::Application {
     std::vector<std::string> enabled_channels_names = {"voltage0", "voltage1"};
     std::vector<bool> enabled_channels_output = {false, false};  // False for input channels
     const size_t num_channels = enabled_channels_names.size();
+
+    // IIOConfigurator operator - configures Pluto SDR once at startup
+    auto config_file_path = std::filesystem::path(__FILE__).parent_path() / "pluto_fft_config.yaml";
+    auto iio_configurator_op = make_operator<ops::IIOConfigurator>(
+        "iio_configurator", Arg("cfg") = config_file_path.string());
 
     // IIOBufferRead operator - reads data from Pluto SDR
     auto iio_buf_read_op =
@@ -107,6 +115,8 @@ class PlutoFFTExample : public holoscan::Application {
           Arg("y_range") = std::vector<float>{-160.0f, 10.0f});  // dB range
 
       // Connect for real-time flow
+      // Start with configurator to set up Pluto SDR
+      add_flow(start_op(), iio_configurator_op);
       add_flow(iio_buf_read_op, iio_convert_op, {{"buffer", "buffer_in"}});
       add_flow(iio_convert_op, buffer_to_tensor_op, {{"buffer_out", "buffer"}});
       add_flow(buffer_to_tensor_op, fft_op, {{"tensor", "in"}});
@@ -122,6 +132,8 @@ class PlutoFFTExample : public holoscan::Application {
           Arg("adc_bits") = adc_bits);
 
       // Connect for one-shot flow
+      // Start with configurator to set up Pluto SDR
+      add_flow(start_op(), iio_configurator_op);
       add_flow(iio_buf_read_op, iio_convert_op, {{"buffer", "buffer_in"}});
       add_flow(iio_convert_op, buffer_to_tensor_op, {{"buffer_out", "buffer"}});
       add_flow(buffer_to_tensor_op, fft_op, {{"tensor", "in"}});

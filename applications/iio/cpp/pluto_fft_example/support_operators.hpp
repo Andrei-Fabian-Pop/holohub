@@ -178,7 +178,7 @@ class BasicIIOBufferPrinterOP : public Operator {
       return;
     }
 
-    const uint enabled_channels = buffer_info->enabled_channels.size();
+    const size_t enabled_channels = buffer_info->enabled_channels.size();
 
     // Print buffer metadata
     HOLOSCAN_LOG_INFO("Buffer info: samples_count={}, device={}, cyclic={}, channels={}",
@@ -193,7 +193,7 @@ class BasicIIOBufferPrinterOP : public Operator {
     }
 
     // Print sample data
-    printSampleData(buffer_info, enabled_channels);
+    printSampleData(buffer_info, static_cast<uint>(enabled_channels));
   }
 
  private:
@@ -514,7 +514,7 @@ inline std::vector<float> convertToMagnitudeSpectrum(const std::vector<complex>&
 inline std::pair<float, float> findPeakFrequency(const std::vector<float>& magnitude_spectrum,
                                                  size_t burst_size, float freq_step_mhz) {
   auto peak_it = std::max_element(magnitude_spectrum.begin(), magnitude_spectrum.end());
-  size_t peak_bin = std::distance(magnitude_spectrum.begin(), peak_it);
+  ssize_t peak_bin = std::distance(magnitude_spectrum.begin(), peak_it);
   float peak_freq_mhz =
       (static_cast<float>(peak_bin) - static_cast<float>(burst_size) / 2.0f) * freq_step_mhz;
   return {peak_freq_mhz, *peak_it};
@@ -569,8 +569,8 @@ class FFTGnuplotOp : public Operator {
                cudaMemcpyDeviceToHost);
 
     // Convert to magnitude spectrum using common utility function
-    auto magnitude_spectrum = fft_utils::convertToMagnitudeSpectrum(
-        host_data, burst_size, power_offset_.get());
+    auto magnitude_spectrum =
+        fft_utils::convertToMagnitudeSpectrum(host_data, burst_size, power_offset_.get());
 
     // Write data file for gnuplot with frequency axis from -fs/2 to +fs/2
     std::string data_file = output_file_.get() + ".dat";
@@ -588,8 +588,8 @@ class FFTGnuplotOp : public Operator {
     data_stream.close();
 
     // Find peak frequency for title using common utility function
-    auto [peak_freq_mhz, peak_magnitude] = fft_utils::findPeakFrequency(
-        magnitude_spectrum, burst_size, freq_step_mhz);
+    auto [peak_freq_mhz, peak_magnitude] =
+        fft_utils::findPeakFrequency(magnitude_spectrum, burst_size, freq_step_mhz);
 
     // Create gnuplot script
     std::string script_file = output_file_.get() + ".gp";
@@ -733,19 +733,20 @@ class FFTGnuplotRealtimeOp : public Operator {
                cudaMemcpyDeviceToHost);
 
     // Convert to magnitude spectrum using common utility function
-    auto magnitude_spectrum = fft_utils::convertToMagnitudeSpectrum(
-        host_data, burst_size, power_offset_.get(), 1e-20f);
+    auto magnitude_spectrum =
+        fft_utils::convertToMagnitudeSpectrum(host_data, burst_size, power_offset_.get(), 1e-20f);
 
     // Find peak frequency for title
     float freq_step = max_frequency_.get() / static_cast<float>(burst_size);
     float freq_step_mhz = freq_step / 1e6f;
-    auto [peak_freq_mhz, peak_magnitude] = fft_utils::findPeakFrequency(
-        magnitude_spectrum, burst_size, freq_step_mhz);
+    auto [peak_freq_mhz, peak_magnitude] =
+        fft_utils::findPeakFrequency(magnitude_spectrum, burst_size, freq_step_mhz);
 
     // Send data to gnuplot with updated title showing peak
-    fprintf(gnuplot_pipe_, 
+    fprintf(gnuplot_pipe_,
             "set title 'Pluto SDR Real-Time FFT - Peak: %.2f MHz (%.1f dB)'\n",
-            peak_freq_mhz, peak_magnitude);
+            peak_freq_mhz,
+            peak_magnitude);
     fprintf(gnuplot_pipe_, "plot '-' with lines linestyle 1 title 'FFT Magnitude'\n");
 
     for (size_t i = 0; i < burst_size; ++i) {

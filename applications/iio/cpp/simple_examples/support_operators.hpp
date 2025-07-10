@@ -26,6 +26,7 @@
 #include <iio.h>
 #include <cmath>
 #include <cstdlib>
+#include <cstring>
 #include <iostream>
 #include <vector>
 
@@ -122,17 +123,33 @@ class BasicIIOBufferEmitterOP : public Operator {
     buffer_info->device_name = device_name;
     buffer_info->samples_count = total_samples;
 
-    // Populate enabled channels
-    iio_channel_info_t ch1_info;
-    ch1_info.name = channel_name;
-    ch1_info.is_output = true;
-    buffer_info->enabled_channels.push_back(ch1_info);
+    // Populate enabled channels using the helper function
+    if (chn) {
+      iio_channel_info_t ch1_info = create_channel_info_from_iio_channel(chn);
+      buffer_info->enabled_channels.push_back(ch1_info);
+    } else {
+      // Fallback if channel not found
+      iio_channel_info_t ch1_info;
+      ch1_info.name = channel_name;
+      ch1_info.is_output = true;
+      ch1_info.index = 0;
+      memset(&ch1_info.format, 0, sizeof(struct iio_data_format));
+      buffer_info->enabled_channels.push_back(ch1_info);
+    }
 
     if (enabled_channels == 2) {
-      iio_channel_info_t ch2_info;
-      ch2_info.name = channel_name2;
-      ch2_info.is_output = true;
-      buffer_info->enabled_channels.push_back(ch2_info);
+      if (chn2) {
+        iio_channel_info_t ch2_info = create_channel_info_from_iio_channel(chn2);
+        buffer_info->enabled_channels.push_back(ch2_info);
+      } else {
+        // Fallback if channel not found
+        iio_channel_info_t ch2_info;
+        ch2_info.name = channel_name2;
+        ch2_info.is_output = true;
+        ch2_info.index = 1;
+        memset(&ch2_info.format, 0, sizeof(struct iio_data_format));
+        buffer_info->enabled_channels.push_back(ch2_info);
+      }
     }
 
     // Fill buffer with interleaved samples for multi-channel setup

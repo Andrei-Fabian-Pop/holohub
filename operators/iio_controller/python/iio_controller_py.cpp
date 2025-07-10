@@ -199,6 +199,22 @@ PYBIND11_MODULE(_iio_controller, m) {
 
   py::class_<iio_data_format>(m, "IIODataFormat")
       .def(py::init<>())
+      .def(py::init([](py::object pyiio_format) -> iio_data_format {
+             // Constructor that accepts a pyiio data format object
+             iio_data_format fmt;
+             fmt.length = pyiio_format.attr("length").cast<unsigned int>();
+             fmt.bits = pyiio_format.attr("bits").cast<unsigned int>();
+             fmt.shift = pyiio_format.attr("shift").cast<unsigned int>();
+             fmt.is_signed = pyiio_format.attr("is_signed").cast<bool>();
+             fmt.is_fully_defined = pyiio_format.attr("is_fully_defined").cast<bool>();
+             fmt.is_be = pyiio_format.attr("is_be").cast<bool>();
+             fmt.with_scale = pyiio_format.attr("with_scale").cast<bool>();
+             fmt.scale = pyiio_format.attr("scale").cast<double>();
+             fmt.repeat = pyiio_format.attr("repeat").cast<unsigned int>();
+             return fmt;
+           }),
+           "Create IIODataFormat from pyiio data format object",
+           py::arg("pyiio_format"))
       .def_readwrite("length", &iio_data_format::length)
       .def_readwrite("bits", &iio_data_format::bits)
       .def_readwrite("shift", &iio_data_format::shift)
@@ -338,6 +354,17 @@ PYBIND11_MODULE(_iio_controller, m) {
            "cfg"_a,
            "name"_a = "iio_configurator"s,
            holoscan::doc::IIOConfigurator::doc_IIOConfigurator_python);
+
+  // Helper function to create channel info from IIO channel
+  m.def(
+      "create_channel_info_from_iio_channel",
+      [](py::capsule channel_capsule) -> iio_channel_info_t {
+        // Extract the iio_channel pointer from the capsule
+        auto* channel = static_cast<const struct iio_channel*>(channel_capsule.get_pointer());
+        return create_channel_info_from_iio_channel(channel);
+      },
+      "Create an IIOChannelInfo structure from an IIO channel pointer",
+      py::arg("channel"));
 
   // Register custom types with the emitter/receiver registry
   m.def("register_types", [](holoscan::EmitterReceiverRegistry& registry) {

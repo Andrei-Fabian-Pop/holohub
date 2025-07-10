@@ -183,39 +183,24 @@ void IIOBufferRead::compute(InputContext&, OutputContext& op_output, ExecutionCo
   std::vector<std::string>& enabled_channel_names = enabled_channel_names_p_.get();
   std::vector<bool>& enabled_channel_types = enabled_channel_types_p_.get();
   for (size_t i = 0; i < enabled_channel_names.size(); ++i) {
-    iio_channel_info_t chan_info;
-    chan_info.name = enabled_channel_names[i];
-    chan_info.is_output = enabled_channel_types[i];
-
-    // Get the channel to retrieve index and format
+    // Get the channel to retrieve complete info
     iio_channel* chn =
         iio_device_find_channel(dev_, enabled_channel_names[i].c_str(), enabled_channel_types[i]);
-    if (chn) {
-      // Get channel index
-      long idx = iio_channel_get_index(chn);
-      if (idx >= 0) {
-        chan_info.index = static_cast<unsigned int>(idx);
-      } else {
-        HOLOSCAN_LOG_WARN("Failed to get index for channel {}, using 0", enabled_channel_names[i]);
-        chan_info.index = 0;
-      }
 
-      // Get channel data format
-      const struct iio_data_format* fmt = iio_channel_get_data_format(chn);
-      if (fmt) {
-        chan_info.format = *fmt;
-      } else {
-        HOLOSCAN_LOG_WARN("Failed to get data format for channel {}", enabled_channel_names[i]);
-        // Initialize with default values
-        memset(&chan_info.format, 0, sizeof(struct iio_data_format));
-      }
+    if (chn) {
+      // Use the helper function to create channel info
+      iio_channel_info_t chan_info = create_channel_info_from_iio_channel(chn);
+      buffer_info->enabled_channels.push_back(chan_info);
     } else {
       HOLOSCAN_LOG_WARN("Failed to find channel {} for info retrieval", enabled_channel_names[i]);
+      // Create a default channel info with the provided name and type
+      iio_channel_info_t chan_info;
+      chan_info.name = enabled_channel_names[i];
+      chan_info.is_output = enabled_channel_types[i];
       chan_info.index = 0;
       memset(&chan_info.format, 0, sizeof(struct iio_data_format));
+      buffer_info->enabled_channels.push_back(chan_info);
     }
-
-    buffer_info->enabled_channels.push_back(chan_info);
   }
 
   if (!buffer_) {

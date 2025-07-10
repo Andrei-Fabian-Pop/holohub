@@ -29,6 +29,7 @@ from holohub.iio_controller import (
     IIOBufferWrite,
     IIOChannelInfo,
     IIOConfigurator,
+    IIODataFormat,
 )
 
 G_NUM_REPETITIONS = 10
@@ -158,16 +159,26 @@ class BasicIIOBufferEmitterOp(Operator):
         buffer_info.is_cyclic = True
         buffer_info.device_name = device_name
 
-        # Populate enabled channels
+        # Populate enabled channels with metadata from the actual IIO channels
         ch1_info = IIOChannelInfo()
         ch1_info.name = channel_name
         ch1_info.is_output = True
+        ch1_info.index = chn.index if hasattr(chn, 'index') else 0
+
+        # Get the actual data format from the IIO channel
+        ch1_info.format = IIODataFormat(chn.data_format)
+
         buffer_info.enabled_channels = [ch1_info]
 
-        if enabled_channels == 2:
+        if enabled_channels == 2 and chn2:
             ch2_info = IIOChannelInfo()
             ch2_info.name = channel_name2
             ch2_info.is_output = True
+            ch2_info.index = chn2.index if hasattr(chn2, 'index') else 1
+
+            # Get the actual data format from the IIO channel
+            ch2_info.format = IIODataFormat(chn2.data_format)
+
             buffer_info.enabled_channels.append(ch2_info)
 
         # Emit the buffer info with the correct type
@@ -236,10 +247,12 @@ class BasicBufferPrinterOp(Operator):
             f"enabled_channels = {len(buffer_info.enabled_channels)}"
         )
 
-        # Print channel information
+        # Print channel information including new fields
         for ch in buffer_info.enabled_channels:
             print(
-                f"Channel: {ch.name} ({'output' if ch.is_output else 'input'})")
+                f"Channel: {ch.name} ({'output' if ch.is_output else 'input'}) "
+                f"index={ch.index} format=(length={ch.format.length}, bits={ch.format.bits}, "
+                f"signed={ch.format.is_signed}, scale={ch.format.scale})")
 
         # Print first X samples per channel
         samples_to_print = 100  # Per channel
@@ -391,8 +404,8 @@ class MyApp(Application):
         """Compose the application."""
         # self.attr_read_example()
         # self.attr_write_example()
-        # self.buffer_write_example()
-        self.buffer_read_example()
+        self.buffer_write_example()
+        # self.buffer_read_example()
         # self.configurator_example()
 
 

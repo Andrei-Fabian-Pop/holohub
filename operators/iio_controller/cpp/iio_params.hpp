@@ -25,10 +25,10 @@ enum class attr_type_t {
 };
 
 struct iio_channel_info_t {
-  // Chn Index
-  // format string
   std::string name;
   bool is_output;
+  unsigned int index;  // Channel index
+  struct iio_data_format format;  // Channel data format
 };
 
 struct iio_buffer_info_t {

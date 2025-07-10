@@ -197,10 +197,24 @@ PYBIND11_MODULE(_iio_controller, m) {
   m.attr("__version__") = "dev";
 #endif
 
+  py::class_<iio_data_format>(m, "IIODataFormat")
+      .def(py::init<>())
+      .def_readwrite("length", &iio_data_format::length)
+      .def_readwrite("bits", &iio_data_format::bits)
+      .def_readwrite("shift", &iio_data_format::shift)
+      .def_readwrite("is_signed", &iio_data_format::is_signed)
+      .def_readwrite("is_fully_defined", &iio_data_format::is_fully_defined)
+      .def_readwrite("is_be", &iio_data_format::is_be)
+      .def_readwrite("with_scale", &iio_data_format::with_scale)
+      .def_readwrite("scale", &iio_data_format::scale)
+      .def_readwrite("repeat", &iio_data_format::repeat);
+
   py::class_<iio_channel_info_t>(m, "IIOChannelInfo")
       .def(py::init<>())
       .def_readwrite("name", &iio_channel_info_t::name)
-      .def_readwrite("is_output", &iio_channel_info_t::is_output);
+      .def_readwrite("is_output", &iio_channel_info_t::is_output)
+      .def_readwrite("index", &iio_channel_info_t::index)
+      .def_readwrite("format", &iio_channel_info_t::format);
 
   py::class_<iio_buffer_info_t>(m, "IIOBufferInfo")
       .def(py::init<>())

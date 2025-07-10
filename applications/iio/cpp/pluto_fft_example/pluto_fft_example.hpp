@@ -84,7 +84,6 @@ class PlutoFFTExample : public holoscan::Application {
         "buffer_to_tensor",
         Arg("num_channels") = static_cast<unsigned int>(num_channels),
         Arg("samples_per_channel") = samples_per_channel,
-        Arg("data_format") = std::string("interleaved_iq"),
         Arg("burst_size") = static_cast<int>(fft_size),
         Arg("num_bursts") = 1,
         Arg("adc_bits") = adc_bits);

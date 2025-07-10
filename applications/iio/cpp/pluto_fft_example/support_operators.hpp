@@ -172,8 +172,6 @@ class IIOChannelConvertOp : public Operator {
   }
 
   Parameter<bool> convert_channels_;
-
-  // IIO context and device for channel conversion
   iio_context* iio_context_;
   iio_device* iio_device_;
 };
@@ -198,11 +196,6 @@ class IIOBuffer2CudaTensorOp : public Operator {
                "Samples per channel",
                "Number of samples per channel",
                8192UL);
-    spec.param(data_format_,
-               "data_format",
-               "Data format",
-               "Format of the input data (interleaved_iq)",
-               std::string("interleaved_iq"));
     spec.param(
         burst_size_, "burst_size", "Burst size", "Number of samples per burst for FFT", 1024);
     spec.param(num_bursts_, "num_bursts", "Number of bursts", "Number of bursts for FFT", 8);
@@ -243,10 +236,7 @@ class IIOBuffer2CudaTensorOp : public Operator {
                         samples_per_channel);
     }
 
-    // Convert data based on format
-    if (data_format_.get() == "interleaved_iq") {
-      convertInterleavedIQToComplex(samples, samples_per_channel * 2);
-    }
+    convertInterleavedIQToComplex(samples, samples_per_channel * 2);
 
     // Emit the tensor with stream
     op_output.emit(std::make_tuple(output_tensor_, stream_), "tensor");
@@ -280,7 +270,6 @@ class IIOBuffer2CudaTensorOp : public Operator {
 
   Parameter<unsigned int> num_channels_;
   Parameter<size_t> samples_per_channel_;
-  Parameter<std::string> data_format_;
   Parameter<int> burst_size_;
   Parameter<int> num_bursts_;
   Parameter<int> adc_bits_;

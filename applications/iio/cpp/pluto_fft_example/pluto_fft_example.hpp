@@ -65,7 +65,29 @@ class PlutoFFTExample : public holoscan::Application {
                                             Arg("cfg") = config_file_path.string(),
                                             make_condition<CountCondition>("config_count", 1));
 
-    // IIOBufferRead operator - reads data from Pluto SDR
+    // Binary file reader - reads data from a binary file
+    auto binary_file_path = std::filesystem::path(__FILE__).parent_path() / "sample_data.bin";
+    auto binary_reader_op =
+        make_operator<ops::BinaryFileReaderOp>("binary_reader",
+                                               Arg("file_path") = binary_file_path.string(),
+                                               Arg("device_name") = std::string("cf-ad9361-dds-core-lpc"),
+                                               Arg("channel_names") = enabled_channels_names,
+                                               Arg("channel_outputs") = std::vector<bool>{true, true}, // Output channels for write
+                                               Arg("samples_per_channel") = samples_per_channel,
+                                               Arg("is_cyclic") = true,
+                                               Arg("sample_size_bytes") = static_cast<size_t>(2),
+                                               make_condition<CountCondition>("binary_count", 1));
+
+    // IIOBufferWrite operator - writes data to Pluto SDR
+    auto iio_buf_write_op =
+        make_operator<ops::IIOBufferWrite>("iio_buffer_write",
+                                           Arg("ctx") = std::string(G_URI),
+                                           Arg("dev") = std::string("cf-ad9361-dds-core-lpc"),
+                                           Arg("is_cyclic") = true,
+                                           Arg("enabled_channel_names") = enabled_channels_names,
+                                           Arg("enabled_channel_output") = std::vector<bool>{true, true}); // Output channels
+
+    // IIOBufferRead operator - reads data from Pluto SDR  
     auto iio_buf_read_op =
         make_operator<ops::IIOBufferRead>("iio_buffer_read",
                                           Arg("ctx") = std::string(G_URI),
@@ -120,24 +142,26 @@ class PlutoFFTExample : public holoscan::Application {
 
       // Define possible flows for dynamic routing from start operator
       add_flow(start_router_op, iio_configurator_op);
-      add_flow(start_router_op, iio_buf_read_op);
+      add_flow(start_router_op, binary_reader_op);
 
-      // Set dynamic flow control on the start operator
+      // Set dynamic flow control on the start operator  
       set_dynamic_flows(start_router_op,
                         [iio_configurator_op,
-                         iio_buf_read_op](const std::shared_ptr<holoscan::Operator>& op) mutable {
+                         binary_reader_op](const std::shared_ptr<holoscan::Operator>& op) mutable {
                           static bool config_done = false;
                           if (!config_done) {
                             HOLOSCAN_LOG_DEBUG("First run - routing to IIO configurator");
                             op->add_dynamic_flow(iio_configurator_op);
                             config_done = true;
                           } else {
-                            HOLOSCAN_LOG_DEBUG("Configuration done - routing to data acquisition");
-                            op->add_dynamic_flow(iio_buf_read_op);
+                            HOLOSCAN_LOG_DEBUG("Configuration done - routing to binary file reader");
+                            op->add_dynamic_flow(binary_reader_op);
                           }
                         });
 
-      // Regular data flow connections
+      // Data flow chain: binary_reader -> write_buffer -> read_buffer -> processing
+      add_flow(binary_reader_op, iio_buf_write_op, {{"buffer", "buffer"}});
+      add_flow(iio_buf_write_op, iio_buf_read_op);
       add_flow(iio_buf_read_op, iio_convert_op, {{"buffer", "buffer_in"}});
       add_flow(iio_convert_op, buffer_to_tensor_op, {{"buffer_out", "buffer"}});
       add_flow(buffer_to_tensor_op, fft_op, {{"tensor", "in"}});
@@ -154,24 +178,26 @@ class PlutoFFTExample : public holoscan::Application {
 
       // Define possible flows for dynamic routing from start operator
       add_flow(start_router_op, iio_configurator_op);
-      add_flow(start_router_op, iio_buf_read_op);
+      add_flow(start_router_op, binary_reader_op);
 
       // Set dynamic flow control on the start operator
       set_dynamic_flows(start_router_op,
                         [iio_configurator_op,
-                         iio_buf_read_op](const std::shared_ptr<holoscan::Operator>& op) mutable {
+                         binary_reader_op](const std::shared_ptr<holoscan::Operator>& op) mutable {
                           static bool config_done_oneshot = false;
                           if (!config_done_oneshot) {
                             HOLOSCAN_LOG_INFO("First run - routing to IIO configurator");
                             op->add_dynamic_flow(iio_configurator_op);
                             config_done_oneshot = true;
                           } else {
-                            HOLOSCAN_LOG_INFO("Configuration done - routing to data acquisition");
-                            op->add_dynamic_flow(iio_buf_read_op);
+                            HOLOSCAN_LOG_INFO("Configuration done - routing to binary file reader");
+                            op->add_dynamic_flow(binary_reader_op);
                           }
                         });
 
-      // Regular data flow connections
+      // Data flow chain: binary_reader -> write_buffer -> read_buffer -> processing
+      add_flow(binary_reader_op, iio_buf_write_op, {{"buffer", "buffer"}});
+      add_flow(iio_buf_write_op, iio_buf_read_op);
       add_flow(iio_buf_read_op, iio_convert_op, {{"buffer", "buffer_in"}});
       add_flow(iio_convert_op, buffer_to_tensor_op, {{"buffer_out", "buffer"}});
       add_flow(buffer_to_tensor_op, fft_op, {{"tensor", "in"}});

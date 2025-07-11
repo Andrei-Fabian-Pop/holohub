@@ -31,6 +31,7 @@
 #include <cstdlib>
 #include <fstream>
 #include <iomanip>
+#include <cstring>
 #include <vector>
 
 using namespace matx;
@@ -39,6 +40,100 @@ using complex = cuda::std::complex<float>;
 static constexpr const char* G_URI = "ip:192.168.2.1";
 
 namespace holoscan::ops {
+
+// =============================================================================
+// Binary File Reader Operator
+// =============================================================================
+
+class BinaryFileReaderOp : public Operator {
+ public:
+  HOLOSCAN_OPERATOR_FORWARD_ARGS(BinaryFileReaderOp);
+  BinaryFileReaderOp() = default;
+  ~BinaryFileReaderOp() = default;
+
+  void setup(OperatorSpec& spec) override {
+    spec.output<std::shared_ptr<iio_buffer_info_t>>("buffer");
+    
+    spec.param(file_path_, "file_path", "File Path", "Path to the binary file to read");
+    spec.param(device_name_, "device_name", "Device Name", "Name of the target device");
+    spec.param(channel_names_, "channel_names", "Channel Names", "List of channel names");
+    spec.param(channel_outputs_, "channel_outputs", "Channel Outputs", "List of channel output flags");
+    spec.param(samples_per_channel_, "samples_per_channel", "Samples Per Channel", "Number of samples per channel");
+    spec.param(is_cyclic_, "is_cyclic", "Is Cyclic", "Whether the buffer should be cyclic", true);
+    spec.param(sample_size_bytes_, "sample_size_bytes", "Sample Size", "Size of each sample in bytes", static_cast<size_t>(2));
+  }
+
+  void compute(InputContext&, OutputContext& op_output, ExecutionContext&) override {
+    // Read binary file
+    std::ifstream file(file_path_.get(), std::ios::binary | std::ios::ate);
+    if (!file.is_open()) {
+      HOLOSCAN_LOG_ERROR("Failed to open file: {}", file_path_.get());
+      return;
+    }
+
+    // Get file size
+    std::streamsize file_size = file.tellg();
+    file.seekg(0, std::ios::beg);
+
+    // Calculate expected size based on parameters
+    size_t num_channels = channel_names_.get().size();
+    size_t expected_size = samples_per_channel_.get() * num_channels * sample_size_bytes_.get();
+
+    if (file_size < static_cast<std::streamsize>(expected_size)) {
+      HOLOSCAN_LOG_ERROR("File size ({} bytes) is smaller than expected ({} bytes)", 
+                         file_size, expected_size);
+      file.close();
+      return;
+    }
+
+    // Create buffer info
+    auto buffer_info = std::make_shared<iio_buffer_info_t>();
+    buffer_info->samples_count = samples_per_channel_.get();
+    buffer_info->is_cyclic = is_cyclic_.get();
+    buffer_info->device_name = device_name_.get();
+
+    // Allocate buffer and read data
+    buffer_info->buffer = new uint8_t[expected_size];
+    file.read(reinterpret_cast<char*>(buffer_info->buffer), expected_size);
+    file.close();
+
+    // Populate channel information
+    auto& channel_names = channel_names_.get();
+    auto& channel_outputs = channel_outputs_.get();
+    
+    for (size_t i = 0; i < channel_names.size(); ++i) {
+      iio_channel_info_t chan_info;
+      chan_info.name = channel_names[i];
+      chan_info.is_output = (i < channel_outputs.size()) ? channel_outputs[i] : true;
+      chan_info.index = static_cast<unsigned int>(i);
+      
+      // Set format for binary data (assuming 16-bit signed samples)
+      memset(&chan_info.format, 0, sizeof(struct iio_data_format));
+      chan_info.format.length = 16;
+      chan_info.format.bits = 16;
+      chan_info.format.is_signed = true;
+      chan_info.format.with_scale = false;
+      chan_info.format.scale = 1.0;
+      
+      buffer_info->enabled_channels.push_back(chan_info);
+    }
+
+    HOLOSCAN_LOG_INFO("Read {} bytes from file {} for {} channels with {} samples per channel",
+                      expected_size, file_path_.get(), num_channels, samples_per_channel_.get());
+
+    // Emit the buffer
+    op_output.emit(buffer_info, "buffer");
+  }
+
+ private:
+  Parameter<std::string> file_path_;
+  Parameter<std::string> device_name_;
+  Parameter<std::vector<std::string>> channel_names_;
+  Parameter<std::vector<bool>> channel_outputs_;
+  Parameter<size_t> samples_per_channel_;
+  Parameter<bool> is_cyclic_;
+  Parameter<size_t> sample_size_bytes_;
+};
 
 // =============================================================================
 // IIO Channel Conversion Operator

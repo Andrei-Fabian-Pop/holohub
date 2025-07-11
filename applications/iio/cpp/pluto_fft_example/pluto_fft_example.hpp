@@ -67,16 +67,31 @@ class PlutoFFTExample : public holoscan::Application {
 
     // Binary file reader - reads data from a binary file
     auto binary_file_path = std::filesystem::path(__FILE__).parent_path() / "sample_data.bin";
-    auto binary_reader_op =
-        make_operator<ops::BinaryFileReaderOp>("binary_reader",
-                                               Arg("file_path") = binary_file_path.string(),
-                                               Arg("device_name") = std::string("cf-ad9361-dds-core-lpc"),
-                                               Arg("channel_names") = enabled_channels_names,
-                                               Arg("channel_outputs") = std::vector<bool>{false, false}, // Input channels (voltage0, voltage1)
-                                               Arg("samples_per_channel") = samples_per_channel,
-                                               Arg("is_cyclic") = true,
-                                               Arg("sample_size_bytes") = static_cast<size_t>(2),
-                                               make_condition<CountCondition>("binary_count", 1));
+    std::shared_ptr<Operator> binary_reader_op;
+    if (realtime_) {
+        // For realtime mode, don't limit the count
+        binary_reader_op =
+            make_operator<ops::BinaryFileReaderOp>("binary_reader",
+                                                   Arg("file_path") = binary_file_path.string(),
+                                                   Arg("device_name") = std::string("cf-ad9361-dds-core-lpc"),
+                                                   Arg("channel_names") = enabled_channels_names,
+                                                   Arg("channel_outputs") = std::vector<bool>{false, false}, // Input channels (voltage0, voltage1)
+                                                   Arg("samples_per_channel") = samples_per_channel,
+                                                   Arg("is_cyclic") = true,
+                                                   Arg("sample_size_bytes") = static_cast<size_t>(2));
+    } else {
+        // For single-shot mode, run only once
+        binary_reader_op =
+            make_operator<ops::BinaryFileReaderOp>("binary_reader",
+                                                   Arg("file_path") = binary_file_path.string(),
+                                                   Arg("device_name") = std::string("cf-ad9361-dds-core-lpc"),
+                                                   Arg("channel_names") = enabled_channels_names,
+                                                   Arg("channel_outputs") = std::vector<bool>{false, false}, // Input channels (voltage0, voltage1)
+                                                   Arg("samples_per_channel") = samples_per_channel,
+                                                   Arg("is_cyclic") = true,
+                                                   Arg("sample_size_bytes") = static_cast<size_t>(2),
+                                                   make_condition<CountCondition>("binary_count", 1));
+    }
 
     // IIOBufferWrite operator - writes data to Pluto SDR
     auto iio_buf_write_op =

@@ -129,7 +129,32 @@ class PlutoFFTExample : public holoscan::Application {
                                 Arg("f2_index") = static_cast<int32_t>(fft_size - 1),
                                 Arg("window_time_delta") = static_cast<uint32_t>(1000));
 
-    // Create the appropriate visualization operator
+    // Define common flows for dynamic routing from start operator
+    add_flow(start_router_op, iio_configurator_op);
+    add_flow(start_router_op, binary_reader_op);
+
+    // Set dynamic flow control on the start operator
+    set_dynamic_flows(start_router_op,
+                      [iio_configurator_op,
+                       binary_reader_op,
+                       this](const std::shared_ptr<holoscan::Operator>& op) mutable {
+                        static bool config_done = false;
+                        if (!config_done) {
+                          HOLOSCAN_LOG_INFO("First run - routing to IIO configurator");
+                          op->add_dynamic_flow(iio_configurator_op);
+                          config_done = true;
+                        } else {
+                          HOLOSCAN_LOG_INFO("Configuration done - routing to binary file reader");
+                          op->add_dynamic_flow(binary_reader_op);
+                        }
+                      });
+
+    // Common data flow chain: binary_reader -> processing (bypass write/read cycle)
+    add_flow(binary_reader_op, iio_convert_op, {{"buffer", "buffer_in"}});
+    add_flow(iio_convert_op, buffer_to_tensor_op, {{"buffer_out", "buffer"}});
+    add_flow(buffer_to_tensor_op, fft_op, {{"tensor", "in"}});
+
+    // Create the appropriate visualization operator based on mode
     if (realtime_) {
       // FFTGnuplotRealtimeOp - real-time plotting with gnuplot
       auto fft_gnuplot_realtime_op = make_operator<ops::FFTGnuplotRealtimeOp>(
@@ -140,29 +165,6 @@ class PlutoFFTExample : public holoscan::Application {
           Arg("update_interval") = 10,
           Arg("y_range") = std::vector<float>{-160.0f, 10.0f});  // dB range
 
-      // Define possible flows for dynamic routing from start operator
-      add_flow(start_router_op, iio_configurator_op);
-      add_flow(start_router_op, binary_reader_op);
-
-      // Set dynamic flow control on the start operator  
-      set_dynamic_flows(start_router_op,
-                        [iio_configurator_op,
-                         binary_reader_op](const std::shared_ptr<holoscan::Operator>& op) mutable {
-                          static bool config_done = false;
-                          if (!config_done) {
-                            HOLOSCAN_LOG_DEBUG("First run - routing to IIO configurator");
-                            op->add_dynamic_flow(iio_configurator_op);
-                            config_done = true;
-                          } else {
-                            HOLOSCAN_LOG_DEBUG("Configuration done - routing to binary file reader");
-                            op->add_dynamic_flow(binary_reader_op);
-                          }
-                        });
-
-      // Data flow chain: binary_reader -> processing (bypass write/read cycle)
-      add_flow(binary_reader_op, iio_convert_op, {{"buffer", "buffer_in"}});
-      add_flow(iio_convert_op, buffer_to_tensor_op, {{"buffer_out", "buffer"}});
-      add_flow(buffer_to_tensor_op, fft_op, {{"tensor", "in"}});
       add_flow(fft_op, fft_gnuplot_realtime_op, {{"out", "buffer"}});
     } else {
       // FFTGnuplotOp - generates gnuplot visualization and exits
@@ -174,29 +176,6 @@ class PlutoFFTExample : public holoscan::Application {
           Arg("power_offset") = 0.0f,  // Can be adjusted for calibration
           Arg("adc_bits") = adc_bits);
 
-      // Define possible flows for dynamic routing from start operator
-      add_flow(start_router_op, iio_configurator_op);
-      add_flow(start_router_op, binary_reader_op);
-
-      // Set dynamic flow control on the start operator
-      set_dynamic_flows(start_router_op,
-                        [iio_configurator_op,
-                         binary_reader_op](const std::shared_ptr<holoscan::Operator>& op) mutable {
-                          static bool config_done_oneshot = false;
-                          if (!config_done_oneshot) {
-                            HOLOSCAN_LOG_INFO("First run - routing to IIO configurator");
-                            op->add_dynamic_flow(iio_configurator_op);
-                            config_done_oneshot = true;
-                          } else {
-                            HOLOSCAN_LOG_INFO("Configuration done - routing to binary file reader");
-                            op->add_dynamic_flow(binary_reader_op);
-                          }
-                        });
-
-      // Data flow chain: binary_reader -> processing (bypass write/read cycle)
-      add_flow(binary_reader_op, iio_convert_op, {{"buffer", "buffer_in"}});
-      add_flow(iio_convert_op, buffer_to_tensor_op, {{"buffer_out", "buffer"}});
-      add_flow(buffer_to_tensor_op, fft_op, {{"tensor", "in"}});
       add_flow(fft_op, fft_gnuplot_op, {{"out", "buffer"}});
     }
   }

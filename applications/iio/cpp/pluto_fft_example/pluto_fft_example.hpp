@@ -72,7 +72,7 @@ class PlutoFFTExample : public holoscan::Application {
                                                Arg("file_path") = binary_file_path.string(),
                                                Arg("device_name") = std::string("cf-ad9361-dds-core-lpc"),
                                                Arg("channel_names") = enabled_channels_names,
-                                               Arg("channel_outputs") = std::vector<bool>{true, true}, // Output channels for write
+                                               Arg("channel_outputs") = std::vector<bool>{false, false}, // Input channels (voltage0, voltage1)
                                                Arg("samples_per_channel") = samples_per_channel,
                                                Arg("is_cyclic") = true,
                                                Arg("sample_size_bytes") = static_cast<size_t>(2),
@@ -97,9 +97,9 @@ class PlutoFFTExample : public holoscan::Application {
                                           Arg("enabled_channel_names") = enabled_channels_names,
                                           Arg("enabled_channel_output") = enabled_channels_output);
 
-    // IIOChannelConvertOp - applies IIO channel conversion before processing
+    // IIOChannelConvertOp - skip conversion for binary file data
     auto iio_convert_op =
-        make_operator<ops::IIOChannelConvertOp>("iio_convert", Arg("convert_channels") = true);
+        make_operator<ops::IIOChannelConvertOp>("iio_convert", Arg("convert_channels") = false);
 
     // IIOBuffer2CudaTensorOp - converts IIO buffer to CUDA tensor
     auto buffer_to_tensor_op = make_operator<ops::IIOBuffer2CudaTensorOp>(
@@ -159,10 +159,8 @@ class PlutoFFTExample : public holoscan::Application {
                           }
                         });
 
-      // Data flow chain: binary_reader -> write_buffer -> read_buffer -> processing
-      add_flow(binary_reader_op, iio_buf_write_op, {{"buffer", "buffer"}});
-      add_flow(iio_buf_write_op, iio_buf_read_op);
-      add_flow(iio_buf_read_op, iio_convert_op, {{"buffer", "buffer_in"}});
+      // Data flow chain: binary_reader -> processing (bypass write/read cycle)
+      add_flow(binary_reader_op, iio_convert_op, {{"buffer", "buffer_in"}});
       add_flow(iio_convert_op, buffer_to_tensor_op, {{"buffer_out", "buffer"}});
       add_flow(buffer_to_tensor_op, fft_op, {{"tensor", "in"}});
       add_flow(fft_op, fft_gnuplot_realtime_op, {{"out", "buffer"}});
@@ -195,10 +193,8 @@ class PlutoFFTExample : public holoscan::Application {
                           }
                         });
 
-      // Data flow chain: binary_reader -> write_buffer -> read_buffer -> processing
-      add_flow(binary_reader_op, iio_buf_write_op, {{"buffer", "buffer"}});
-      add_flow(iio_buf_write_op, iio_buf_read_op);
-      add_flow(iio_buf_read_op, iio_convert_op, {{"buffer", "buffer_in"}});
+      // Data flow chain: binary_reader -> processing (bypass write/read cycle)
+      add_flow(binary_reader_op, iio_convert_op, {{"buffer", "buffer_in"}});
       add_flow(iio_convert_op, buffer_to_tensor_op, {{"buffer_out", "buffer"}});
       add_flow(buffer_to_tensor_op, fft_op, {{"tensor", "in"}});
       add_flow(fft_op, fft_gnuplot_op, {{"out", "buffer"}});

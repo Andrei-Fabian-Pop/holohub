@@ -395,9 +395,17 @@ inline std::vector<float> convertToMagnitudeSpectrum(const std::vector<complex>&
     // Apply FFT size normalization
     const float normalized_power = mag_squared * fft_normalization;
 
-    // Apply logarithmic scale
-    const float db_value =
-        (normalized_power > noise_floor_threshold) ? 10.0f * std::log10(normalized_power) : -160.0f;
+    // Apply logarithmic scale with smoother noise floor handling
+    float db_value;
+    if (normalized_power > noise_floor_threshold) {
+      db_value = 10.0f * std::log10(normalized_power);
+    } else if (normalized_power > 0) {
+      // Use actual value instead of hard floor to avoid discontinuities
+      db_value = 10.0f * std::log10(noise_floor_threshold);
+    } else {
+      // Only use -160 dB for actual zeros
+      db_value = -160.0f;
+    }
     magnitude_spectrum[i] = db_value + power_offset;
   }
   return magnitude_spectrum;

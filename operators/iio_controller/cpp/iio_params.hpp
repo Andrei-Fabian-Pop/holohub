@@ -37,7 +37,7 @@ struct iio_channel_info_t {
 
 struct iio_buffer_info_t {
   size_t samples_count;
-  void* buffer;
+  std::vector<int8_t> buffer;
   std::vector<iio_channel_info_t> enabled_channels;
   bool is_cyclic;
   std::string device_name;

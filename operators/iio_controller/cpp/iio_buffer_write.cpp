@@ -149,8 +149,8 @@ void IIOBufferWrite::compute(InputContext& op_input, OutputContext&, ExecutionCo
   }
   auto buffer_info = op_input.receive<std::shared_ptr<iio_buffer_info_t>>("buffer").value();
 
-  if (buffer_info->buffer == nullptr) {
-    HOLOSCAN_LOG_ERROR("Buffer is null");
+  if (buffer_info->buffer.empty()) {
+    HOLOSCAN_LOG_ERROR("Buffer is empty");
     return;
   }
 
@@ -182,7 +182,7 @@ void IIOBufferWrite::compute(InputContext& op_input, OutputContext&, ExecutionCo
   // Copy the buffer data to the IIO buffer
   void* buffer_data = iio_buffer_start(buffer_);
   memcpy(buffer_data,
-         buffer_info->buffer,
+         buffer_info->buffer.data(),
          buffer_info->samples_count * static_cast<size_t>(sample_size_));
 
   ssize_t res = iio_buffer_push(buffer_);

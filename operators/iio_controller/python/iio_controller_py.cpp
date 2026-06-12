@@ -244,14 +244,13 @@ PYBIND11_MODULE(_iio_controller, m) {
       .def_property(
           "buffer",
           [](const iio_buffer_info_t& self) -> py::bytes {
-            if (self.buffer == nullptr)
+            if (self.buffer.empty())
               return py::bytes();
-            return py::bytes(static_cast<char*>(self.buffer), self.samples_count * sizeof(int16_t));
+            return py::bytes(reinterpret_cast<const char*>(self.buffer.data()), self.buffer.size());
           },
           [](iio_buffer_info_t& self, py::bytes data) {
             std::string str_data = data;
-            self.buffer = malloc(str_data.size());
-            std::memcpy(self.buffer, str_data.data(), str_data.size());
+            self.buffer.assign(str_data.begin(), str_data.end());
           });
 
   py::class_<IIOAttributeRead,

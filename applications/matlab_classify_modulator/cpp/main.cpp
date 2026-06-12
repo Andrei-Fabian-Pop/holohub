@@ -45,7 +45,7 @@ class IIOToMatlabAdapterOp : public Operator {
 
     // The buffer contains interleaved I/Q data for all enabled channels
     // Cast the buffer to int16_t* for MATLAB processing
-    int16_t* data = reinterpret_cast<int16_t*>(buffer_info->buffer);
+    int16_t* data = reinterpret_cast<int16_t*>(buffer_info->buffer.data());
 
     // Create a copy of the data that will be managed by this operator
     size_t data_size = buffer_info->samples_count * buffer_info->enabled_channels.size();

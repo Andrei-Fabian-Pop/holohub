@@ -177,7 +177,7 @@ void IIOBufferRead::compute(InputContext&, OutputContext& op_output, ExecutionCo
     return;
   }
   auto buffer_info = std::shared_ptr<iio_buffer_info_t>(new iio_buffer_info_t);
-  buffer_info->buffer = nullptr;
+  buffer_info->buffer = {};
   buffer_info->samples_count = 0;
   buffer_info->is_cyclic = is_cyclic.get();
   buffer_info->device_name = dev_p_.get();
@@ -227,8 +227,8 @@ void IIOBufferRead::compute(InputContext&, OutputContext& op_output, ExecutionCo
   buffer_info->samples_count = bytes_read / sample_size_;
 
   void* buffer_data = iio_buffer_start(buffer_);
-  buffer_info->buffer = new int8_t[bytes_read];
-  memcpy(buffer_info->buffer, buffer_data, bytes_read);
+  buffer_info->buffer.resize(bytes_read);
+  memcpy(buffer_info->buffer.data(), buffer_data, bytes_read);
 
   op_output.emit(buffer_info, "buffer");
 }
